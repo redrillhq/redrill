@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # No go.sum yet; the module cache holds only golangci-lint, keyed by its pin in the Makefile.
+          cache-dependency-path: Makefile
+      - run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false # nothing to cache until go.sum exists
+      - run: make test
+
+  # Wired per MILESTONES M1; trivially green until integration tests land (M5+).
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false # nothing to cache until go.sum exists
+      - run: make test-integration
+
+  # Wired per MILESTONES M1; trivially green until the sabotage kit lands (M5+).
+  sabotage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false # nothing to cache until go.sum exists
+      - run: make test-sabotage

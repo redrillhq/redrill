@@ -1,0 +1,93 @@
+# Implements docs/agents/LINTING.md — if this file and that doc drift, fix both in the same PR.
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - depguard
+    - errorlint
+    - forbidigo
+    - gocritic
+    - gosec
+    - misspell
+    - noctx
+    - nolintlint
+    - rowserrcheck
+    - sqlclosecheck
+  settings:
+    errcheck:
+      exclude-functions:
+        # CLI/usage output; an unwritable stderr has no recovery path.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    depguard:
+      rules:
+        executor-seam:
+          files:
+            - "**/internal/driver/**"
+            - "**/internal/checks/**"
+            - "**/internal/sandbox/**"
+          deny:
+            - pkg: github.com/alyamovsky/drillbit/internal/store
+              desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
+            - pkg: github.com/alyamovsky/drillbit/internal/orchestrate
+              desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
+            - pkg: github.com/alyamovsky/drillbit/internal/server
+              desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
+            - pkg: github.com/alyamovsky/drillbit/internal/notify
+              desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
+            - pkg: github.com/alyamovsky/drillbit/internal/scheduler
+              desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
+        leaf-config:
+          files:
+            - "**/internal/config/**"
+          deny:
+            - pkg: github.com/alyamovsky/drillbit/internal
+              desc: internal/config is a leaf — it imports no other drillbit package
+        leaf-redact:
+          files:
+            - "**/internal/redact/**"
+          deny:
+            - pkg: github.com/alyamovsky/drillbit/internal
+              desc: internal/redact is a leaf — it imports no other drillbit package
+        no-cgo-sqlite:
+          files:
+            - $all
+          deny:
+            - pkg: github.com/mattn/go-sqlite3
+              desc: cgo breaks static builds — modernc.org/sqlite in internal/store is the only SQL driver
+        sql-only-in-store:
+          files:
+            - $all
+            - "!**/internal/store/**"
+          deny:
+            - pkg: modernc.org/sqlite
+              desc: only internal/store may import a SQL driver (ARCHITECTURE.md import rules)
+            - pkg: database/sql
+              desc: only internal/store may import a SQL driver (ARCHITECTURE.md import rules)
+    forbidigo:
+      forbid:
+        - pattern: ^fmt\.Print(f|ln)?$
+          msg: output goes through slog or the CLI renderer, not raw prints
+    misspell:
+      locale: US
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    rules:
+      # cmd/ is the CLI renderer; raw prints are its job.
+      - path: ^cmd/
+        linters:
+          - forbidigo
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/alyamovsky/drillbit

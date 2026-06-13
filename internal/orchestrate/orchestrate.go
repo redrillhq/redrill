@@ -36,6 +36,7 @@ type RunOptions struct {
 	Trigger store.Trigger      // schedule | manual | api (default manual)
 	Level   string             // "" runs all configured levels in order; else only this one
 	Report  func(LevelOutcome) // optional: called per level as it completes (streaming)
+	Scratch config.Scratch     // where restores land (L2/L3) + the byte quota
 }
 
 // LevelOutcome is one level's result, for streaming and rendering.
@@ -80,10 +81,18 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	}
 	result := RunResult{RunID: runID}
 
+	// The file_count_tolerance baseline is the previous proven run's restored
+	// count — read here, orchestrator-side; checks never touch the store.
+	prevFileCount := 0
+	if last, ok, err := o.store.LastRunWithResult(ctx, drill.Name, store.ResultPass); err == nil && ok {
+		prevFileCount = int(last.FilesRestored)
+	}
+
 	shortCircuit := false
 	var bytesRestored int64
+	var filesRestored int
 	for _, lv := range levels {
-		outcome, ran, err := o.runLevel(ctx, runID, drill, src, lv, start, shortCircuit, &bytesRestored)
+		outcome, ran, err := o.runLevel(ctx, runID, drill, src, lv, start, shortCircuit, opts.Scratch, prevFileCount, &bytesRestored, &filesRestored)
 		if err != nil {
 			return RunResult{}, err
 		}
@@ -106,6 +115,7 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 		Result:        result.Status,
 		LevelReached:  result.LevelReached,
 		BytesRestored: bytesRestored,
+		FilesRestored: int64(filesRestored),
 		DurationMS:    end.Sub(start).Milliseconds(),
 		FinishedAt:    end,
 	}
@@ -117,13 +127,13 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 
 // runLevel runs (or skips) one level, persisting its step and evidence. ran
 // reports whether the level actually executed (vs. skipped).
-func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.Drill, src config.Source, lv leveled, start time.Time, shortCircuit bool, bytes *int64) (LevelOutcome, bool, error) {
+func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.Drill, src config.Source, lv leveled, start time.Time, shortCircuit bool, scratch config.Scratch, prevFileCount int, bytes *int64, files *int) (LevelOutcome, bool, error) {
 	if shortCircuit {
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (a lower level did not pass)"}
 		return out, false, o.recordStep(ctx, runID, out, start)
 	}
 
-	res, err := o.exec.RunStep(ctx, o.buildStep(runID, drill, src, lv, start))
+	res, err := o.exec.RunStep(ctx, o.buildStep(runID, drill, src, lv, start, scratch, prevFileCount))
 	switch {
 	case errors.Is(err, exec.ErrUnsupported):
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (level not implemented yet)"}
@@ -147,6 +157,7 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 		return out, true, err
 	}
 	*bytes += res.Bytes
+	*files += res.Files
 	if res.Status == checks.Pass {
 		if err := o.store.RecordProof(ctx, drill.Name, lv.name, start); err != nil {
 			return out, true, fmt.Errorf("record proof for %s/%s: %w", drill.Name, lv.name, err)
@@ -166,12 +177,18 @@ func (o *Orchestrator) recordStep(ctx context.Context, runID int64, out LevelOut
 	return nil
 }
 
-func (o *Orchestrator) buildStep(runID int64, drill config.Drill, src config.Source, lv leveled, now time.Time) exec.StepSpec {
-	spec := exec.StepSpec{RunID: runID, Drill: drill.Name, Level: lv.name, Source: src, Now: now}
-	if lv.name == "l1" {
-		spec.L1 = drill.Levels.L1
+func (o *Orchestrator) buildStep(runID int64, drill config.Drill, src config.Source, lv leveled, now time.Time, scratch config.Scratch, prevFileCount int) exec.StepSpec {
+	spec := exec.StepSpec{
+		RunID: runID, Drill: drill.Name, Level: lv.name, Source: src, Now: now,
+		Scratch: scratch, PrevFileCount: prevFileCount,
 	}
-	// L2/L3 specs attach here in M7/M8.
+	switch lv.name {
+	case "l1":
+		spec.L1 = drill.Levels.L1
+	case "l2":
+		spec.L2 = drill.Levels.L2
+	}
+	// L3 spec attaches here in M8.
 	return spec
 }
 

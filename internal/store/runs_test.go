@@ -147,6 +147,40 @@ func TestListRunsNewestFirstAndLimit(t *testing.T) {
 	}
 }
 
+func TestFilesRestoredAndLastRunWithResult(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	id1, err := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerManual, StartedAt: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRun(ctx, Run{ID: id1, Result: ResultPass, FilesRestored: 120, FinishedAt: epoch.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	id2, _ := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerManual, StartedAt: epoch.Add(time.Hour)})
+	if err := s.FinishRun(ctx, Run{ID: id2, Result: ResultFail, FilesRestored: 3, FinishedAt: epoch.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := s.GetRun(ctx, id1); got.FilesRestored != 120 {
+		t.Errorf("files_restored = %d, want 120", got.FilesRestored)
+	}
+
+	// The baseline is the most recent *passed* run, not the later fail.
+	last, ok, err := s.LastRunWithResult(ctx, "d", ResultPass)
+	if err != nil || !ok {
+		t.Fatalf("LastRunWithResult: %v ok=%v", err, ok)
+	}
+	if last.ID != id1 || last.FilesRestored != 120 {
+		t.Errorf("last passed run = id %d / %d files, want %d / 120", last.ID, last.FilesRestored, id1)
+	}
+	if _, ok, _ := s.LastRunWithResult(ctx, "ghost", ResultPass); ok {
+		t.Error("ghost drill should have no passed run")
+	}
+}
+
 func TestStepsEvidenceArtifacts(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

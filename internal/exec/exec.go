@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,8 +34,15 @@ type StepSpec struct {
 	Drill  string        `json:"drill"`
 	Level  string        `json:"level"`
 	Source config.Source `json:"source"`
-	L1     *config.L1    `json:"l1,omitempty"` // L2/L3 specs join this in M7/M8
+	L1     *config.L1    `json:"l1,omitempty"`
+	L2     *config.L2    `json:"l2,omitempty"` // L3 spec joins this in M8
 	Now    time.Time     `json:"now"`
+
+	// Set for restore levels (L2/L3): where to restore, and the previous proven
+	// run's restored file count (the file_count_tolerance baseline, read from the
+	// store by the orchestrator — checks never touch the store).
+	Scratch       config.Scratch `json:"scratch"`
+	PrevFileCount int            `json:"prev_file_count"`
 }
 
 // StepResult is the serializable outcome of a step: the per-check evidence plus
@@ -83,6 +92,10 @@ func (e *LocalExecutor) RunStep(ctx context.Context, step StepSpec) (StepResult,
 		return runDumpdirL1(ctx, step)
 	case step.Level == "l1" && step.Source.Type == "borg":
 		return e.runBorgL1(ctx, step)
+	case step.Level == "l2" && step.Source.Type == "borg":
+		return e.runBorgL2(ctx, step)
+	case step.Level == "l2" && step.Source.Type == "dumpdir":
+		return runDumpdirL2(ctx, step)
 	default:
 		return StepResult{}, fmt.Errorf("%w: level %q source %q", ErrUnsupported, step.Level, step.Source.Type)
 	}
@@ -314,4 +327,177 @@ func resolveSecret(file, env string) (string, error) {
 		return os.Getenv(env), nil
 	}
 	return "", nil
+}
+
+// runBorgL2 restores a sample (or the include_paths) of the newest archive into
+// scratch and runs the L2 checks against it.
+func (e *LocalExecutor) runBorgL2(ctx context.Context, step StepSpec) (StepResult, error) {
+	res := StepResult{Level: step.Level}
+	l2 := step.L2
+	if l2 == nil {
+		res.Status, res.Summary = checks.Pass, "no L2 config"
+		return res, nil
+	}
+	src := step.Source
+	passphrase, err := resolveSecret(src.PassphraseFile, src.PassphraseEnv)
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	red := redact.New()
+	red.AddSecret(passphrase)
+
+	d := borg.New(src.Repo,
+		borg.WithBinary(src.Binary), borg.WithPassphrase(passphrase),
+		borg.WithSSHKey(src.SSHKeyFile), borg.WithRunner(e.borgRunner),
+	)
+	if err := d.Validate(ctx); err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+	snaps, err := d.ListSnapshots(ctx)
+	if err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+	if len(snaps) == 0 {
+		return errorStep(res, "no archives in repository"), nil
+	}
+	archive := snaps[0].ID // newest
+
+	var paths []string
+	var predicted int64
+	if l2.Restore.Scope == "full" {
+		predicted, _ = d.ArchiveSize(ctx, archive) // best-effort; the quota still bounds it
+	} else {
+		files, err := d.ListFiles(ctx, archive)
+		if err != nil {
+			return errorStep(res, red.Redact(err.Error())), nil
+		}
+		paths, predicted = selectSample(files, l2.Restore.Sample, l2.Restore.IncludePaths, uint64(step.RunID)) //nolint:gosec // G115: run ids are positive
+	}
+
+	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	defer sc.cleanup()
+	if err := sc.preflight(predicted); err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{archive}, Paths: paths}, sc.root); err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+	return finishL2(ctx, res, sc.root, l2.Checks, step, red), nil
+}
+
+// runDumpdirL2 copies the picked dump file(s) into scratch and runs L2 checks.
+func runDumpdirL2(ctx context.Context, step StepSpec) (StepResult, error) {
+	res := StepResult{Level: step.Level}
+	l2 := step.L2
+	if l2 == nil {
+		res.Status, res.Summary = checks.Pass, "no L2 config"
+		return res, nil
+	}
+	red := redact.New()
+	d := dumpdir.New(step.Source.Path, step.Source.Pattern)
+	if err := d.Validate(ctx); err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	snaps, err := d.ListSnapshots(ctx)
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	if len(snaps) == 0 {
+		return errorStep(res, fmt.Sprintf("no files match %q in %s", step.Source.Pattern, step.Source.Path)), nil
+	}
+	selected := snaps[:1]
+	if step.Source.Pick == "all-matching-window" {
+		selected = snaps
+	}
+	var ids []string
+	var predicted int64
+	for _, s := range selected {
+		ids = append(ids, s.ID)
+		predicted += s.Size
+	}
+
+	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	defer sc.cleanup()
+	if err := sc.preflight(predicted); err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: ids}, sc.root); err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	return finishL2(ctx, res, sc.root, l2.Checks, step, red), nil
+}
+
+// finishL2 walks the restored tree once for aggregates, runs the configured L2
+// checks, and fills the result.
+func finishL2(ctx context.Context, res StepResult, restoreDir string, cfgChecks []config.Check, step StepSpec, red *redact.Redactor) StepResult {
+	count, total, newest := walkAggregates(restoreDir)
+	env := checks.CheckEnv{RestoreDir: restoreDir, Now: step.Now}
+	for _, cc := range cfgChecks {
+		c := buildL2Check(cc, count, total, newest, step.PrevFileCount)
+		if c == nil {
+			continue // exec checks (Phase 3) aren't wired yet
+		}
+		ev, err := c.Run(ctx, env)
+		if err != nil {
+			ev = checks.Evidence{Kind: c.Kind(), Status: checks.Error, Actual: err.Error()}
+		}
+		redactEvidence(red, &ev)
+		res.Evidence = append(res.Evidence, ev)
+	}
+	res.Files, res.Bytes = count, total
+	res.Status = aggregate(res.Evidence)
+	res.Summary = red.Redact(summarize(res.Status, res.Evidence))
+	return res
+}
+
+// buildL2Check maps a config check to its runtime check, feeding aggregate-based
+// kinds the values computed once over the restore.
+func buildL2Check(cc config.Check, count int, total int64, newest time.Time, prev int) checks.Check {
+	switch cc.Kind {
+	case "path_exists":
+		return checks.PathExists{Path: cc.Path}
+	case "path_absent":
+		return checks.PathAbsent{Path: cc.Path}
+	case "canary_file":
+		return checks.CanaryFile{Path: cc.Path}
+	case "hash_match":
+		return checks.HashMatch{} // borg exposes no per-file manifest → engine-verified
+	case "newest_file_max_age":
+		return checks.NewestFileMaxAge{Newest: newest, Max: cc.NewestFileMaxAge.Duration()}
+	case "min_total_bytes":
+		return checks.MinTotalBytes{Total: total, Min: cc.MinTotalBytes.Bytes()}
+	case "file_count_tolerance_pct":
+		return checks.FileCountTolerance{Count: count, Prev: prev, Pct: cc.FileCountTolerancePct}
+	}
+	return nil
+}
+
+// walkAggregates returns the restored regular-file count, total bytes, and the
+// newest mtime.
+func walkAggregates(dir string) (int, int64, time.Time) {
+	var count int
+	var total int64
+	var newest time.Time
+	_ = filepath.WalkDir(dir, func(_ string, e fs.DirEntry, err error) error {
+		if err != nil || e.IsDir() {
+			return nil //nolint:nilerr // a walk error on one entry shouldn't abort the aggregate
+		}
+		info, err := e.Info()
+		if err != nil {
+			return nil //nolint:nilerr // skip entries that vanished mid-walk
+		}
+		count++
+		total += info.Size()
+		if mt := info.ModTime(); mt.After(newest) {
+			newest = mt
+		}
+		return nil
+	})
+	return count, total, newest
 }

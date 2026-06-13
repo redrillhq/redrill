@@ -22,6 +22,15 @@ type Snapshot struct {
 	Size int64     // bytes, best-effort (0 if unknown)
 }
 
+// FileEntry is one entry inside a snapshot's contents (e.g. a borg archive
+// listing), used to select an L2 restore sample.
+type FileEntry struct {
+	Path   string
+	Size   int64
+	Mtime  time.Time
+	IsFile bool // a regular file (not a directory or symlink)
+}
+
 // NativeCheckOpts parameterizes a native integrity check. Empty for now; the
 // borg driver (M6) adds repo/archive scope and read-data options.
 type NativeCheckOpts struct{}

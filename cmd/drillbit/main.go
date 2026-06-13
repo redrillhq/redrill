@@ -201,7 +201,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 
 	host, _ := os.Hostname()
 	o := orchestrate.New(st, exec.NewLocal(host), func() time.Time { return time.Now().UTC() })
-	opts := orchestrate.RunOptions{Trigger: store.TriggerManual, Level: *level}
+	opts := orchestrate.RunOptions{Trigger: store.TriggerManual, Level: *level, Scratch: cfg.Scratch}
 	if !*jsonOut {
 		opts.Report = func(out orchestrate.LevelOutcome) { printLevel(stdout, out) }
 	}

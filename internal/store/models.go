@@ -52,6 +52,7 @@ type Run struct {
 	Result        Result
 	LevelReached  string
 	BytesRestored int64
+	FilesRestored int64
 	DurationMS    int64
 	Executor      string
 }

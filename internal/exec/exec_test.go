@@ -130,9 +130,9 @@ func TestRunStepNoFilesIsError(t *testing.T) {
 func TestRunStepUnsupported(t *testing.T) {
 	t.Parallel()
 	cases := []StepSpec{
-		{Level: "l2", Source: config.Source{Type: "dumpdir"}},
 		{Level: "l1", Source: config.Source{Type: "restic"}},
 		{Level: "l3", Source: config.Source{Type: "borg"}},
+		{Level: "l3", Source: config.Source{Type: "dumpdir"}},
 	}
 	for _, step := range cases {
 		_, err := NewLocal("h").RunStep(context.Background(), step)
@@ -192,11 +192,12 @@ func TestStepResultSerializable(t *testing.T) {
 // fakeBorg stands in for the borg binary so the borg L1 glue is unit-testable
 // without a real engine. Subcommand → canned (stderr, exit).
 type fakeBorg struct {
-	validateExit int    // borg list --short
-	listExit     int    // borg list --json
-	checkExit    int    // borg check
-	listJSON     string // borg list --json stdout
-	checkStderr  string // borg check stderr (to test redaction)
+	validateExit  int    // borg list --short
+	listExit      int    // borg list --json
+	checkExit     int    // borg check
+	listJSON      string // borg list --json stdout
+	listFilesJSON string // borg list --json-lines stdout
+	checkStderr   string // borg check stderr (to test redaction)
 }
 
 func (f fakeBorg) run(_ context.Context, _ string, _ []string, _ string, args []string) ([]byte, []byte, int, error) {
@@ -206,8 +207,11 @@ func (f fakeBorg) run(_ context.Context, _ string, _ []string, _ string, args []
 	switch args[0] {
 	case "list":
 		for _, a := range args {
-			if a == "--short" {
+			switch a {
+			case "--short":
 				return nil, []byte("validate error"), f.validateExit, nil
+			case "--json-lines":
+				return []byte(f.listFilesJSON), nil, 0, nil
 			}
 		}
 		return []byte(f.listJSON), []byte("list error"), f.listExit, nil
@@ -215,8 +219,18 @@ func (f fakeBorg) run(_ context.Context, _ string, _ []string, _ string, args []
 		return nil, []byte(f.checkStderr), f.checkExit, nil
 	case "info":
 		return []byte(`{"archives":[{"stats":{"original_size":1000}}]}`), nil, 0, nil
+	case "extract":
+		return nil, nil, 0, nil // a fake can't restore real files; L2 success is integration-tested
 	}
 	return nil, nil, 0, nil
+}
+
+func borgFilesJSON(sizes ...int64) string {
+	var b strings.Builder
+	for i, sz := range sizes {
+		fmt.Fprintf(&b, `{"type":"-","path":"data/f%d.txt","size":%d,"mtime":"2026-06-13T12:00:00.000000"}`+"\n", i, sz)
+	}
+	return b.String()
 }
 
 func borgExecutor(f fakeBorg) *LocalExecutor {
@@ -341,6 +355,85 @@ func evidenceByKind(res StepResult, kind string) checks.Evidence {
 		}
 	}
 	return checks.Evidence{}
+}
+
+// A restore that would blow the scratch quota is refused up front — an error
+// (the auditor declined), never a fail.
+func TestRunBorgL2ScratchQuotaError(t *testing.T) {
+	t.Parallel()
+	f := fakeBorg{
+		listJSON:      borgListJSON(base.Add(-1 * time.Hour)),
+		listFilesJSON: borgFilesJSON(50, 50, 50), // 150 bytes predicted
+	}
+	l2 := &config.L2{Restore: config.Restore{Scope: "sample", Sample: &config.Sample{Files: 10}}}
+	step := StepSpec{
+		RunID: 1, Level: "l2", Source: config.Source{Type: "borg", Repo: "/r"}, L2: l2,
+		Scratch: config.Scratch{Dir: t.TempDir(), MaxBytes: config.Size(100)}, Now: base,
+	}
+	res, _ := borgExecutor(f).RunStep(context.Background(), step)
+	if res.Status != checks.Error {
+		t.Fatalf("status = %s, want error", res.Status)
+	}
+	if !strings.Contains(res.Summary, "preflight") {
+		t.Errorf("summary = %q, want it to cite the preflight", res.Summary)
+	}
+}
+
+func dumpdirL2Step(dir string, cfgChecks []config.Check, scratchDir string, maxBytes int64) StepSpec {
+	return StepSpec{
+		RunID:   1,
+		Level:   "l2",
+		Source:  config.Source{Type: "dumpdir", Path: dir, Pattern: "*.sql.gz", Pick: "newest"},
+		L2:      &config.L2{Checks: cfgChecks},
+		Scratch: config.Scratch{Dir: scratchDir, MaxBytes: config.Size(maxBytes)},
+		Now:     base,
+	}
+}
+
+// dumpdir restores real files, so L2 success is unit-testable here.
+func TestRunDumpdirL2Pass(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	makeGz(t, dir, "app-1.sql.gz", "SELECT 1; -- a healthy dump", base)
+	step := dumpdirL2Step(dir, []config.Check{
+		{Kind: "path_exists", Path: "app-1.sql.gz"},
+		{Kind: "min_total_bytes", MinTotalBytes: config.Size(1)},
+	}, t.TempDir(), 0)
+
+	res, err := NewLocal("h").RunStep(context.Background(), step)
+	if err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if res.Status != checks.Pass {
+		t.Fatalf("status = %s, want pass (%s)", res.Status, res.Summary)
+	}
+	if res.Files != 1 {
+		t.Errorf("files = %d, want 1", res.Files)
+	}
+}
+
+func TestRunDumpdirL2PathMissingFails(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base)
+	step := dumpdirL2Step(dir, []config.Check{{Kind: "path_exists", Path: "data/missing"}}, t.TempDir(), 0)
+
+	res, _ := NewLocal("h").RunStep(context.Background(), step)
+	if res.Status != checks.Fail {
+		t.Errorf("status = %s, want fail (path missing)", res.Status)
+	}
+}
+
+func TestRunDumpdirL2ScratchQuotaError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	makeGz(t, dir, "app-1.sql.gz", "content larger than one byte", base)
+	step := dumpdirL2Step(dir, []config.Check{{Kind: "min_total_bytes", MinTotalBytes: config.Size(1)}}, t.TempDir(), 1)
+
+	res, _ := NewLocal("h").RunStep(context.Background(), step)
+	if res.Status != checks.Error {
+		t.Errorf("status = %s, want error (scratch quota)", res.Status)
+	}
 }
 
 func TestAggregatePrecedence(t *testing.T) {

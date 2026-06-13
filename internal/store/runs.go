@@ -10,7 +10,7 @@ import (
 // scanner is the read surface common to *sql.Row and *sql.Rows.
 type scanner interface{ Scan(dest ...any) error }
 
-const runColumns = `id, drill, "trigger", started_at, finished_at, result, level_reached, bytes_restored, duration_ms, executor`
+const runColumns = `id, drill, "trigger", started_at, finished_at, result, level_reached, bytes_restored, files_restored, duration_ms, executor`
 
 const (
 	runByID       = `SELECT ` + runColumns + ` FROM runs WHERE id = ?`
@@ -59,9 +59,9 @@ func (s *Store) FinishRun(ctx context.Context, r Run) error {
 		return fmt.Errorf("finish run: id required")
 	}
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE runs SET finished_at = ?, result = ?, level_reached = ?, bytes_restored = ?, duration_ms = ?
+		UPDATE runs SET finished_at = ?, result = ?, level_reached = ?, bytes_restored = ?, files_restored = ?, duration_ms = ?
 		WHERE id = ?`,
-		nullTime(r.FinishedAt), nullResult(r.Result), r.LevelReached, r.BytesRestored, r.DurationMS, r.ID)
+		nullTime(r.FinishedAt), nullResult(r.Result), r.LevelReached, r.BytesRestored, r.FilesRestored, r.DurationMS, r.ID)
 	if err != nil {
 		return fmt.Errorf("finish run %d: %w", r.ID, err)
 	}
@@ -115,6 +115,21 @@ func (s *Store) ListRuns(ctx context.Context, drill string, limit int) ([]Run, e
 	return out, nil
 }
 
+// LastRunWithResult returns the most recent run for a drill with the given
+// result, and whether one exists. The orchestrator uses it to find the previous
+// proven run's restored file count (the file_count_tolerance baseline).
+func (s *Store) LastRunWithResult(ctx context.Context, drill string, result Result) (Run, bool, error) {
+	q := `SELECT ` + runColumns + ` FROM runs WHERE drill = ? AND result = ? ORDER BY id DESC LIMIT 1`
+	r, err := scanRun(s.db.QueryRowContext(ctx, q, drill, string(result)))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, false, nil
+	}
+	if err != nil {
+		return Run{}, false, fmt.Errorf("last %s run for %s: %w", result, drill, err)
+	}
+	return r, true, nil
+}
+
 func scanRun(sc scanner) (Run, error) {
 	var (
 		r        Run
@@ -124,7 +139,7 @@ func scanRun(sc scanner) (Run, error) {
 		result   sql.NullString
 	)
 	if err := sc.Scan(&r.ID, &r.Drill, &trigger, &started, &finished, &result,
-		&r.LevelReached, &r.BytesRestored, &r.DurationMS, &r.Executor); err != nil {
+		&r.LevelReached, &r.BytesRestored, &r.FilesRestored, &r.DurationMS, &r.Executor); err != nil {
 		return Run{}, err
 	}
 	r.Trigger = Trigger(trigger)

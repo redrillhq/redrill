@@ -52,6 +52,7 @@ func TestOnlyReadOnlyCommands(t *testing.T) {
 
 	_ = d.Validate(ctx)
 	_, _ = d.ListSnapshots(ctx)
+	_, _ = d.ListFiles(ctx, "arch-2")
 	_, _ = d.NativeCheck(ctx, driver.NativeCheckOpts{})
 	_, _ = d.Restore(ctx, driver.Selection{SnapshotIDs: []string{"arch-2"}, Paths: []string{"config/"}}, t.TempDir())
 	_, _ = d.ArchiveSize(ctx, "arch-2")
@@ -86,6 +87,30 @@ func TestParseListNewestFirst(t *testing.T) {
 	got := snaps[0].Time
 	if got.Hour() != 18 || got.Minute() != 20 || got.Second() != 51 {
 		t.Errorf("arch-2 time = %v, want 18:20:51 wall clock", got)
+	}
+}
+
+func TestParseFiles(t *testing.T) {
+	t.Parallel()
+	files, err := parseFiles(read(t, "list-files.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	regs := 0
+	var cfg driver.FileEntry
+	for _, f := range files {
+		if f.IsFile {
+			regs++
+		}
+		if f.Path == "config/config.php" {
+			cfg = f
+		}
+	}
+	if len(files) != 7 || regs != 3 {
+		t.Fatalf("entries=%d regular=%d, want 7/3 (4 dirs + 3 files)", len(files), regs)
+	}
+	if !cfg.IsFile || cfg.Size != 4 {
+		t.Errorf("config/config.php entry = %+v, want regular file of 4 bytes", cfg)
 	}
 }
 

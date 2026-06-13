@@ -161,6 +161,19 @@ func (d *Driver) Restore(ctx context.Context, sel driver.Selection, targetDir st
 	return dirReport(targetDir)
 }
 
+// ListFiles returns an archive's contents (one line of JSON per entry) for L2
+// sample selection.
+func (d *Driver) ListFiles(ctx context.Context, archive string) ([]driver.FileEntry, error) {
+	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, []string{"list", "--json-lines", d.repo + "::" + archive})
+	if err != nil {
+		return nil, fmt.Errorf("borg list %s::%s: %w", d.repo, archive, err)
+	}
+	if exit != 0 {
+		return nil, fmt.Errorf("borg list %s::%s: exit %d: %s", d.repo, archive, exit, oneLine(stderr))
+	}
+	return parseFiles(stdout)
+}
+
 // ArchiveSize returns an archive's original (uncompressed) size via
 // `borg info --json`, for size-anomaly detection.
 func (d *Driver) ArchiveSize(ctx context.Context, id string) (int64, error) {
@@ -220,6 +233,34 @@ func parseArchiveSize(b []byte) (int64, error) {
 		return 0, errors.New("borg info json: no archive")
 	}
 	return ij.Archives[0].Stats.OriginalSize, nil
+}
+
+type fileLineJSON struct {
+	Type  string `json:"type"`
+	Path  string `json:"path"`
+	Size  int64  `json:"size"`
+	Mtime string `json:"mtime"`
+}
+
+// parseFiles parses `borg list --json-lines` output (one JSON object per line).
+func parseFiles(b []byte) ([]driver.FileEntry, error) {
+	var out []driver.FileEntry
+	for _, line := range bytes.Split(b, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var fl fileLineJSON
+		if err := json.Unmarshal(line, &fl); err != nil {
+			return nil, fmt.Errorf("parse borg list line: %w", err)
+		}
+		fe := driver.FileEntry{Path: fl.Path, Size: fl.Size, IsFile: fl.Type == "-"}
+		if t, err := parseBorgTime(fl.Mtime); err == nil {
+			fe.Mtime = t
+		}
+		out = append(out, fe)
+	}
+	return out, nil
 }
 
 // borgTimeLayouts covers borg 1.x's naive ISO timestamps (microseconds, no zone).

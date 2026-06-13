@@ -19,6 +19,7 @@ import (
 	"github.com/alyamovsky/drillbit/internal/config"
 	"github.com/alyamovsky/drillbit/internal/exec"
 	"github.com/alyamovsky/drillbit/internal/orchestrate"
+	"github.com/alyamovsky/drillbit/internal/sandbox/docker"
 	"github.com/alyamovsky/drillbit/internal/store"
 )
 
@@ -200,7 +201,15 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	defer func() { _ = st.Close() }()
 
 	host, _ := os.Hostname()
-	o := orchestrate.New(st, exec.NewLocal(host), func() time.Time { return time.Now().UTC() })
+	executor := exec.NewLocal(host)
+	// Wire the L3 sandbox runtime if a container engine is reachable; without
+	// one, L3 degrades to skipped. The janitor reaps orphans from crashed runs.
+	if rt, rerr := docker.NewRuntime(ctx); rerr == nil {
+		defer func() { _ = rt.Close() }()
+		_, _ = rt.Janitor(ctx)
+		executor.WithSandbox(rt)
+	}
+	o := orchestrate.New(st, executor, func() time.Time { return time.Now().UTC() })
 	opts := orchestrate.RunOptions{Trigger: store.TriggerManual, Level: *level, Scratch: cfg.Scratch}
 	if !*jsonOut {
 		opts.Report = func(out orchestrate.LevelOutcome) { printLevel(stdout, out) }

@@ -174,20 +174,21 @@ func TestRunShortCircuitsHigherLevels(t *testing.T) {
 	}
 }
 
-func TestRunUnimplementedLevelSkippedNotFailed(t *testing.T) {
+// L3 with no container runtime degrades to skipped (never a silent pass): the
+// run still passes on L1, but L3 is not proven.
+func TestRunNoSandboxRuntimeSkipsL3(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
 	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-1*time.Hour)) // L1 passes
+	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-1*time.Hour))
 	levels := l1Full()
-	levels.L3 = &config.L3{}
-
+	levels.L3 = &config.L3{Sandbox: config.Sandbox{Image: "postgres:16"}}
 	st := newStore(t)
 	drill, src := drillFor(dir, levels)
-	res := runDrill(t, st, drill, src, RunOptions{})
 
-	// L1 passed; L3 is unimplemented → skipped, not a failure → run still passes.
+	res := runDrill(t, st, drill, src, RunOptions{})
 	if res.Status != store.ResultPass {
-		t.Fatalf("result = %s, want pass (unimplemented L3 must not fail the run)", res.Status)
+		t.Fatalf("result = %s, want pass (L1 proven, L3 skipped)", res.Status)
 	}
 	var l3 LevelOutcome
 	for _, lv := range res.Levels {
@@ -195,8 +196,11 @@ func TestRunUnimplementedLevelSkippedNotFailed(t *testing.T) {
 			l3 = lv
 		}
 	}
-	if l3.Status != statusSkipped || !strings.Contains(l3.Summary, "not implemented") {
-		t.Errorf("l3 outcome = %+v, want skipped/not-implemented", l3)
+	if l3.Status != statusSkipped || !strings.Contains(l3.Summary, "no sandbox runtime") {
+		t.Errorf("l3 = %+v, want skipped (no sandbox runtime)", l3)
+	}
+	if _, ok, _ := st.GetProof(ctx, "app-db", "l3"); ok {
+		t.Error("L3 was proven despite being skipped — that would be a silent pass")
 	}
 }
 

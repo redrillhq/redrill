@@ -3,6 +3,8 @@ package checks
 import (
 	"context"
 	"time"
+
+	"github.com/alyamovsky/drillbit/internal/sandbox"
 )
 
 // Status is a single check's verdict (DESIGN §9.8). A check that runs yields
@@ -32,13 +34,13 @@ type Evidence struct {
 
 // CheckEnv carries what a check needs to run, supplied by the orchestrator. Now
 // is the run's reference time (so age/freshness checks share one clock and stay
-// testable). Fields grow per milestone: RestoreDir (L2 restores, M7) is here
-// now; a sandbox handle (L3, M8) and prior-run baselines (tolerance checks, M7)
-// arrive with those milestones. Checks never reach back into the store or global
-// state (ARCHITECTURE import rules) — everything they use is passed in here.
+// testable); RestoreDir is the L2 restore tree; Sandbox is the L3 container that
+// sql checks run psql in. Checks never reach back into the store or global state
+// (ARCHITECTURE import rules) — everything they use is passed in here.
 type CheckEnv struct {
 	RestoreDir string
 	Now        time.Time
+	Sandbox    sandbox.Sandbox
 }
 
 // Check is one typed assertion producing Evidence (DESIGN §9.2; signature is

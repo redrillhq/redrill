@@ -131,8 +131,8 @@ func TestRunStepUnsupported(t *testing.T) {
 	t.Parallel()
 	cases := []StepSpec{
 		{Level: "l1", Source: config.Source{Type: "restic"}},
-		{Level: "l3", Source: config.Source{Type: "borg"}},
-		{Level: "l3", Source: config.Source{Type: "dumpdir"}},
+		{Level: "l2", Source: config.Source{Type: "restic"}},
+		{Level: "l3", Source: config.Source{Type: "restic"}},
 	}
 	for _, step := range cases {
 		_, err := NewLocal("h").RunStep(context.Background(), step)

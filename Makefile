@@ -16,8 +16,11 @@ test:
 	go test -race ./...
 
 # Real-engine tests in containers (needs Docker); build tag keeps them out of `make test`.
+# -p 1 serializes package binaries: the sandbox janitor reaps every drillbit
+# container, so two packages' container tests must not run at once (drillbit is
+# single-flight in production anyway).
 test-integration:
-	go test -race -tags integration ./...
+	go test -race -tags integration -p 1 ./...
 
 # The sabotage gate (TESTING.md): every fixture must be flagged. Trivially green until fixtures land.
 test-sabotage:

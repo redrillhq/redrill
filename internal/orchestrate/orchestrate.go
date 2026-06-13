@@ -138,6 +138,10 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 	case errors.Is(err, exec.ErrUnsupported):
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (level not implemented yet)"}
 		return out, false, o.recordStep(ctx, runID, out, start)
+	case errors.Is(err, exec.ErrNoSandboxRuntime):
+		// L3 with no container runtime degrades to skipped, never a silent pass.
+		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (no sandbox runtime)"}
+		return out, false, o.recordStep(ctx, runID, out, start)
 	case err != nil:
 		out := LevelOutcome{Level: lv.name, Status: string(checks.Error), Summary: "executor: " + err.Error()}
 		return out, true, o.recordStep(ctx, runID, out, start)
@@ -187,8 +191,9 @@ func (o *Orchestrator) buildStep(runID int64, drill config.Drill, src config.Sou
 		spec.L1 = drill.Levels.L1
 	case "l2":
 		spec.L2 = drill.Levels.L2
+	case "l3":
+		spec.L3 = drill.Levels.L3
 	}
-	// L3 spec attaches here in M8.
 	return spec
 }
 

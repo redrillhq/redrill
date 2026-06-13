@@ -16,6 +16,7 @@ import (
 	"github.com/alyamovsky/drillbit/internal/driver/borg"
 	"github.com/alyamovsky/drillbit/internal/driver/dumpdir"
 	"github.com/alyamovsky/drillbit/internal/redact"
+	"github.com/alyamovsky/drillbit/internal/sandbox"
 )
 
 // ErrUnsupported is returned (wrapped) when a step's (level, source type) isn't
@@ -35,7 +36,8 @@ type StepSpec struct {
 	Level  string        `json:"level"`
 	Source config.Source `json:"source"`
 	L1     *config.L1    `json:"l1,omitempty"`
-	L2     *config.L2    `json:"l2,omitempty"` // L3 spec joins this in M8
+	L2     *config.L2    `json:"l2,omitempty"`
+	L3     *config.L3    `json:"l3,omitempty"`
 	Now    time.Time     `json:"now"`
 
 	// Set for restore levels (L2/L3): where to restore, and the previous proven
@@ -74,11 +76,19 @@ type Executor interface {
 // engines.
 type LocalExecutor struct {
 	host       string
-	borgRunner borg.Runner // nil = the real borg binary; tests inject a fake
+	borgRunner borg.Runner            // nil = the real borg binary; tests inject a fake
+	sandbox    sandbox.SandboxRuntime // nil = no L3 runtime → L3 skipped
 }
 
 // NewLocal returns a LocalExecutor identifying itself as host.
 func NewLocal(host string) *LocalExecutor { return &LocalExecutor{host: host} }
+
+// WithSandbox sets the L3 sandbox runtime (e.g. the Docker runtime). Without
+// one, L3 is reported skipped, never pass.
+func (e *LocalExecutor) WithSandbox(rt sandbox.SandboxRuntime) *LocalExecutor {
+	e.sandbox = rt
+	return e
+}
 
 func (e *LocalExecutor) Describe() ExecutorInfo { return ExecutorInfo{Host: e.host} }
 
@@ -96,6 +106,10 @@ func (e *LocalExecutor) RunStep(ctx context.Context, step StepSpec) (StepResult,
 		return e.runBorgL2(ctx, step)
 	case step.Level == "l2" && step.Source.Type == "dumpdir":
 		return runDumpdirL2(ctx, step)
+	case step.Level == "l3" && step.Source.Type == "dumpdir":
+		return e.runDumpdirL3(ctx, step)
+	case step.Level == "l3" && step.Source.Type == "borg":
+		return e.runBorgL3(ctx, step)
 	default:
 		return StepResult{}, fmt.Errorf("%w: level %q source %q", ErrUnsupported, step.Level, step.Source.Type)
 	}

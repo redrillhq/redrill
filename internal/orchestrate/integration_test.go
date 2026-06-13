@@ -3,6 +3,7 @@
 package orchestrate
 
 import (
+	"compress/gzip"
 	"context"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/alyamovsky/drillbit/internal/config"
 	exe "github.com/alyamovsky/drillbit/internal/exec"
+	"github.com/alyamovsky/drillbit/internal/sandbox/docker"
 	"github.com/alyamovsky/drillbit/internal/store"
 )
 
@@ -123,5 +125,91 @@ func TestIntegrationMissingDataDir(t *testing.T) {
 	res := runBorgDrill(t, repo, passFile)
 	if res.Status != store.ResultFail {
 		t.Fatalf("missing-data-dir NOT caught: result = %s, want fail; levels = %+v", res.Status, res.Levels)
+	}
+}
+
+// --- L3 postgres sandbox (real Docker) ---
+
+func requireDocker(t *testing.T) *docker.Runtime {
+	t.Helper()
+	rt, err := docker.NewRuntime(context.Background())
+	if err != nil {
+		t.Skipf("no docker runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	return rt
+}
+
+// sqlDumpdir writes body as a gzipped plain-SQL "dump" in a fresh dumpdir.
+func sqlDumpdir(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	f, err := os.Create(filepath.Join(dir, "app.sql.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	if _, err := gz.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func runL3Drill(t *testing.T, rt *docker.Runtime, dir, image string, cfgChecks []config.Check) RunResult {
+	t.Helper()
+	st := newStore(t)
+	src := config.Source{Name: "dumps", Type: "dumpdir", Path: dir, Pattern: "*.sql.gz", Pick: "newest"}
+	drill := config.Drill{Name: "app-db", Source: "dumps", Levels: config.Levels{
+		L3: &config.L3{Sandbox: config.Sandbox{Image: image, Memory: config.Size(1 << 30)}, Checks: cfgChecks},
+	}}
+	o := New(st, exe.NewLocal("test").WithSandbox(rt), func() time.Time { return time.Now().UTC() })
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	res, err := o.Run(ctx, drill, src, RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return res
+}
+
+func TestIntegrationDumpdirL3(t *testing.T) {
+	rt := requireDocker(t)
+	dir := sqlDumpdir(t, "CREATE TABLE users(id int);\nINSERT INTO users VALUES (1),(2),(3);\n")
+	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
+		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
+		{Kind: "sql_no_error", SQLNoError: "select * from users limit 1"},
+	})
+	if res.Status != store.ResultPass {
+		t.Fatalf("dumpdir L3 = %s, want pass; levels = %+v", res.Status, res.Levels)
+	}
+}
+
+// wrong-db-dump: the dump loads but the key table is empty → sql count fails.
+func TestIntegrationWrongDBDump(t *testing.T) {
+	rt := requireDocker(t)
+	dir := sqlDumpdir(t, "CREATE TABLE users(id int);\n")
+	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
+		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
+	})
+	if res.Status != store.ResultFail {
+		t.Fatalf("wrong-db-dump NOT caught: %s, want fail; levels = %+v", res.Status, res.Levels)
+	}
+}
+
+// version-trap: a dump from a newer pg major than the sandbox is refused.
+func TestIntegrationVersionTrap(t *testing.T) {
+	rt := requireDocker(t)
+	dir := sqlDumpdir(t, "-- Dumped from database version 99.0\nCREATE TABLE users(id int);\nINSERT INTO users VALUES (1);\n")
+	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
+		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
+	})
+	if res.Status != store.ResultFail {
+		t.Fatalf("version-trap NOT caught: %s, want fail; levels = %+v", res.Status, res.Levels)
 	}
 }

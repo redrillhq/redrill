@@ -82,6 +82,11 @@ linters:
       - path: ^cmd/
         linters:
           - forbidigo
+      # gosec on test code is noise (temp files, test-only perms); it stays on
+      # for production code, where secret-file perms and path handling matter.
+      - path: _test\.go
+        linters:
+          - gosec
 
 formatters:
   enable:

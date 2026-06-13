@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRun(t *testing.T) {
@@ -189,6 +192,130 @@ func TestValidate(t *testing.T) {
 		}
 		if out.Valid || len(out.Errors) == 0 {
 			t.Errorf("want valid=false with errors, got %+v", out)
+		}
+	})
+}
+
+// setupRunConfig writes a temp dumpdir holding one gzip dump (with mtime) and a
+// config pointing at it, and returns the config path.
+func setupRunConfig(t *testing.T, body string, mtime time.Time) string {
+	t.Helper()
+	tmp := t.TempDir()
+	dumps := filepath.Join(tmp, "dumps")
+	if err := os.Mkdir(dumps, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dumps, "app-1.sql.gz")
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	if _, err := gz.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	body2 := fmt.Sprintf(`version: 1
+data_dir: %s
+scratch: {dir: %s}
+sources:
+  - {name: dumps, type: dumpdir, path: %s, pattern: "*.sql.gz", pick: newest}
+drills:
+  - name: app-db
+    source: dumps
+    schedule: "Sun 05:00"
+    levels:
+      l1: {file_min_bytes: 1, compression_test: true, max_age: 36h}
+`, filepath.Join(tmp, "data"), filepath.Join(tmp, "scratch"), dumps)
+	return writeConfig(t, body2)
+}
+
+func TestRunDrill(t *testing.T) {
+	t.Parallel()
+
+	t.Run("healthy dump exits 0", func(t *testing.T) {
+		t.Parallel()
+		cfg := setupRunConfig(t, "SELECT 1;", time.Now().Add(-1*time.Hour))
+		var stdout, stderr bytes.Buffer
+		if got := run([]string{"run", "app-db", "-c", cfg}, &stdout, &stderr); got != 0 {
+			t.Fatalf("exit = %d, want 0 (stderr %q)", got, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "PASS") {
+			t.Errorf("stdout = %q, want PASS", stdout.String())
+		}
+	})
+
+	t.Run("stale dump fails with exit 1", func(t *testing.T) {
+		t.Parallel()
+		cfg := setupRunConfig(t, "SELECT 1;", time.Now().Add(-30*24*time.Hour))
+		var stdout, stderr bytes.Buffer
+		if got := run([]string{"run", "app-db", "-c", cfg}, &stdout, &stderr); got != 1 {
+			t.Fatalf("exit = %d, want 1 (drill fail)", got)
+		}
+	})
+
+	t.Run("unreadable source errors with exit 2", func(t *testing.T) {
+		t.Parallel()
+		tmp := t.TempDir()
+		cfg := writeConfig(t, fmt.Sprintf(`version: 1
+data_dir: %s
+scratch: {dir: %s}
+sources: [{name: dumps, type: dumpdir, path: /no/such/dir, pattern: "*.sql.gz"}]
+drills: [{name: app-db, source: dumps, schedule: "x", levels: {l1: {max_age: 36h}}}]
+`, filepath.Join(tmp, "data"), filepath.Join(tmp, "scratch")))
+		var stdout, stderr bytes.Buffer
+		if got := run([]string{"run", "app-db", "-c", cfg}, &stdout, &stderr); got != 2 {
+			t.Fatalf("exit = %d, want 2 (infra error, distinct from drill fail)", got)
+		}
+	})
+
+	t.Run("unknown drill exits 2", func(t *testing.T) {
+		t.Parallel()
+		cfg := setupRunConfig(t, "x", time.Now())
+		var stdout, stderr bytes.Buffer
+		if got := run([]string{"run", "ghost", "-c", cfg}, &stdout, &stderr); got != 2 {
+			t.Fatalf("exit = %d, want 2", got)
+		}
+	})
+
+	t.Run("missing NAME exits 2", func(t *testing.T) {
+		t.Parallel()
+		var stdout, stderr bytes.Buffer
+		if got := run([]string{"run"}, &stdout, &stderr); got != 2 {
+			t.Fatalf("exit = %d, want 2", got)
+		}
+	})
+
+	t.Run("json output", func(t *testing.T) {
+		t.Parallel()
+		cfg := setupRunConfig(t, "SELECT 1;", time.Now().Add(-1*time.Hour))
+		var stdout, stderr bytes.Buffer
+		if got := run([]string{"run", "app-db", "-c", cfg, "--json"}, &stdout, &stderr); got != 0 {
+			t.Fatalf("exit = %d, want 0 (stderr %q)", got, stderr.String())
+		}
+		var out struct {
+			Status string `json:"status"`
+			Levels []struct {
+				Level  string `json:"level"`
+				Checks []struct {
+					Kind   string `json:"kind"`
+					Status string `json:"status"`
+				} `json:"checks"`
+			} `json:"levels"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+			t.Fatalf("bad json: %v (%q)", err, stdout.String())
+		}
+		if out.Status != "pass" || len(out.Levels) != 1 || len(out.Levels[0].Checks) != 3 {
+			t.Errorf("json = %+v, want pass/l1/3 checks", out)
 		}
 	})
 }

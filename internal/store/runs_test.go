@@ -1,0 +1,233 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
+
+func TestRunLifecycle(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	id, err := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerSchedule, StartedAt: epoch, Executor: "local"})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("CreateRun returned id 0")
+	}
+
+	got, err := s.GetRun(ctx, id)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.Result != "" || !got.FinishedAt.IsZero() {
+		t.Errorf("fresh run should be unfinished: result=%q finished=%v", got.Result, got.FinishedAt)
+	}
+	if got.Trigger != TriggerSchedule || got.Executor != "local" || !got.StartedAt.Equal(epoch) {
+		t.Errorf("run fields mismatch: %+v", got)
+	}
+
+	fin := epoch.Add(90 * time.Second)
+	err = s.FinishRun(ctx, Run{ID: id, Result: ResultPass, LevelReached: "l2", BytesRestored: 4096, DurationMS: 90000, FinishedAt: fin})
+	if err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+	got, err = s.GetRun(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Result != ResultPass || got.LevelReached != "l2" || got.BytesRestored != 4096 || got.DurationMS != 90000 {
+		t.Errorf("finished run mismatch: %+v", got)
+	}
+	if !got.FinishedAt.Equal(fin) || got.FinishedAt.Location() != time.UTC {
+		t.Errorf("finished_at = %v, want %v UTC", got.FinishedAt, fin)
+	}
+	// Identity fields set at create survive FinishRun.
+	if got.Executor != "local" || got.Trigger != TriggerSchedule {
+		t.Errorf("FinishRun clobbered identity fields: %+v", got)
+	}
+}
+
+func TestCreateRunValidation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+	tests := []struct {
+		name string
+		run  Run
+	}{
+		{"no drill", Run{Trigger: TriggerManual, StartedAt: epoch}},
+		{"no trigger", Run{Drill: "d", StartedAt: epoch}},
+		{"no started_at", Run{Drill: "d", Trigger: TriggerManual}},
+		{"bad trigger", Run{Drill: "d", Trigger: Trigger("cron"), StartedAt: epoch}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := s.CreateRun(ctx, tt.run); err == nil {
+				t.Fatal("want error")
+			}
+		})
+	}
+}
+
+// A bad verdict must never reach the store: the runs.result CHECK enforces the
+// pass|fail|error taxonomy (DESIGN §9.8) at the storage boundary.
+func TestFinishRunRejectsBadResult(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+	id, err := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerManual, StartedAt: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.FinishRun(ctx, Run{ID: id, Result: Result("ok"), FinishedAt: epoch.Add(time.Second)})
+	if err == nil {
+		t.Fatal("want error for invalid result")
+	}
+}
+
+func TestFinishRunNotFound(t *testing.T) {
+	t.Parallel()
+	s := newStore(t)
+	err := s.FinishRun(context.Background(), Run{ID: 999, Result: ResultPass, FinishedAt: epoch})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestGetRunNotFound(t *testing.T) {
+	t.Parallel()
+	s := newStore(t)
+	_, err := s.GetRun(context.Background(), 1)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestListRunsNewestFirstAndLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	var ids []int64
+	for i := range 5 {
+		id, err := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerSchedule, StartedAt: epoch.Add(time.Duration(i) * time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	// A run for a different drill must not appear.
+	if _, err := s.CreateRun(ctx, Run{Drill: "other", Trigger: TriggerManual, StartedAt: epoch}); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := s.ListRuns(ctx, "d", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 5 {
+		t.Fatalf("len = %d, want 5", len(all))
+	}
+	if all[0].ID != ids[4] || all[4].ID != ids[0] {
+		t.Errorf("not newest-first: got %d..%d", all[0].ID, all[4].ID)
+	}
+
+	limited, err := s.ListRuns(ctx, "d", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 2 || limited[0].ID != ids[4] || limited[1].ID != ids[3] {
+		t.Errorf("limit=2 mismatch: %+v", limited)
+	}
+}
+
+func TestStepsEvidenceArtifacts(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	id, err := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerManual, StartedAt: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i, kind := range []string{"plan", "restore", "checks"} {
+		st := RunStep{RunID: id, Kind: kind, StartedAt: epoch.Add(time.Duration(i) * time.Minute), Status: "ok", Summary: kind + " done"}
+		if err := s.AddStep(ctx, st); err != nil {
+			t.Fatalf("AddStep: %v", err)
+		}
+	}
+	steps, err := s.ListSteps(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 3 {
+		t.Fatalf("steps = %d, want 3", len(steps))
+	}
+	for i, st := range steps {
+		if st.Idx != i {
+			t.Errorf("step[%d].Idx = %d, want %d (auto-assigned, ordered)", i, st.Idx, i)
+		}
+	}
+	if steps[1].Kind != "restore" {
+		t.Errorf("steps not in insertion order: %+v", steps)
+	}
+
+	weakEv := Evidence{RunID: id, CheckKind: "canary_file", Target: "CANARY", Expected: "present", Actual: "present", Status: "pass", Weak: true}
+	strongEv := Evidence{RunID: id, CheckKind: "sql", Target: "users", Expected: "> 0", Actual: "42", Status: "pass"}
+	for _, ev := range []Evidence{strongEv, weakEv} {
+		if err := s.AddEvidence(ctx, ev); err != nil {
+			t.Fatalf("AddEvidence: %v", err)
+		}
+	}
+	evs, err := s.ListEvidence(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 2 {
+		t.Fatalf("evidence = %d, want 2", len(evs))
+	}
+	if evs[0].Weak || !evs[1].Weak {
+		t.Errorf("weak flag round-trip wrong: %+v", evs)
+	}
+
+	if err := s.AddArtifact(ctx, Artifact{RunID: id, Name: "run.log", Path: "/a/run.log", Bytes: 1234}); err != nil {
+		t.Fatalf("AddArtifact: %v", err)
+	}
+	arts, err := s.ListArtifacts(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(arts) != 1 || arts[0].Name != "run.log" || arts[0].Bytes != 1234 {
+		t.Errorf("artifacts mismatch: %+v", arts)
+	}
+}
+
+// Children reference runs(id) by foreign key — proof that foreign_keys is ON.
+func TestAddStepUnknownRunFails(t *testing.T) {
+	t.Parallel()
+	s := newStore(t)
+	err := s.AddStep(context.Background(), RunStep{RunID: 404, Kind: "plan", StartedAt: epoch, Status: "ok"})
+	if err == nil {
+		t.Fatal("want foreign-key error for unknown run")
+	}
+}
+
+func TestAddStepRequiresStartedAt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+	id, err := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerManual, StartedAt: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddStep(ctx, RunStep{RunID: id, Kind: "plan", Status: "ok"}); err == nil {
+		t.Fatal("want error for zero started_at")
+	}
+}

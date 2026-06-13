@@ -32,10 +32,12 @@ type Report struct {
 	Summary string
 }
 
-// Selection names what to restore. The borg/L2 work (M7) extends this with
-// sample sizing (N random + M newest) and include paths.
+// Selection names what to restore: which snapshots, and (for archive engines
+// like borg) which paths inside them. The L2 work (M7) extends this with sample
+// sizing (N random + M newest).
 type Selection struct {
 	SnapshotIDs []string
+	Paths       []string // subset to extract; empty means the whole snapshot
 }
 
 // RestoreReport summarizes a restore.

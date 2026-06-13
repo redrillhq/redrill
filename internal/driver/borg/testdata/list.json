@@ -1,0 +1,28 @@
+{
+    "archives": [
+        {
+            "archive": "arch-1",
+            "barchive": "arch-1",
+            "id": "dafc02723b20d89a3ffaf1c655e6c70256cb956e4d855ca7102463db0b4c9e44",
+            "name": "arch-1",
+            "start": "2026-06-13T18:20:49.000000",
+            "time": "2026-06-13T18:20:49.000000"
+        },
+        {
+            "archive": "arch-2",
+            "barchive": "arch-2",
+            "id": "724d14a324488c68c52bb61ff53e924dcbc5001ad1838902f8fb0ad900ad5731",
+            "name": "arch-2",
+            "start": "2026-06-13T18:20:51.000000",
+            "time": "2026-06-13T18:20:51.000000"
+        }
+    ],
+    "encryption": {
+        "mode": "repokey"
+    },
+    "repository": {
+        "id": "97344c48bb1f94fba1830b3268a9e0a7942755378149014496c63b896a13a677",
+        "last_modified": "2026-06-13T18:20:51.000000",
+        "location": "/tmp/r"
+    }
+}

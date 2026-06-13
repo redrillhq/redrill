@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/alyamovsky/drillbit/internal/checks"
 	"github.com/alyamovsky/drillbit/internal/config"
+	"github.com/alyamovsky/drillbit/internal/driver"
+	"github.com/alyamovsky/drillbit/internal/driver/borg"
 	"github.com/alyamovsky/drillbit/internal/driver/dumpdir"
 	"github.com/alyamovsky/drillbit/internal/redact"
 )
@@ -60,7 +64,8 @@ type Executor interface {
 // LocalExecutor runs steps in this process, against the local filesystem and
 // engines.
 type LocalExecutor struct {
-	host string
+	host       string
+	borgRunner borg.Runner // nil = the real borg binary; tests inject a fake
 }
 
 // NewLocal returns a LocalExecutor identifying itself as host.
@@ -73,10 +78,14 @@ func (e *LocalExecutor) Describe() ExecutorInfo { return ExecutorInfo{Host: e.ho
 // (fail) and "couldn't check" (error) — is reported in StepResult with a nil
 // error.
 func (e *LocalExecutor) RunStep(ctx context.Context, step StepSpec) (StepResult, error) {
-	if step.Level == "l1" && step.Source.Type == "dumpdir" {
+	switch {
+	case step.Level == "l1" && step.Source.Type == "dumpdir":
 		return runDumpdirL1(ctx, step)
+	case step.Level == "l1" && step.Source.Type == "borg":
+		return e.runBorgL1(ctx, step)
+	default:
+		return StepResult{}, fmt.Errorf("%w: level %q source %q", ErrUnsupported, step.Level, step.Source.Type)
 	}
-	return StepResult{}, fmt.Errorf("%w: level %q source %q", ErrUnsupported, step.Level, step.Source.Type)
 }
 
 func runDumpdirL1(ctx context.Context, step StepSpec) (StepResult, error) {
@@ -185,4 +194,124 @@ func errorStep(res StepResult, summary string) StepResult {
 	res.Status = checks.Error
 	res.Summary = summary
 	return res
+}
+
+// runBorgL1 runs L1 against a borg repo: native check (engine delegation),
+// snapshot recency, and size-anomaly detection. Secrets are resolved locally
+// (the remotable design) and fed to the redactor so nothing leaks into evidence.
+func (e *LocalExecutor) runBorgL1(ctx context.Context, step StepSpec) (StepResult, error) {
+	res := StepResult{Level: step.Level}
+	src := step.Source
+
+	passphrase, err := resolveSecret(src.PassphraseFile, src.PassphraseEnv)
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	red := redact.New()
+	red.AddSecret(passphrase)
+
+	d := borg.New(src.Repo,
+		borg.WithBinary(src.Binary),
+		borg.WithPassphrase(passphrase),
+		borg.WithSSHKey(src.SSHKeyFile),
+		borg.WithRunner(e.borgRunner),
+	)
+	if err := d.Validate(ctx); err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+
+	l1 := step.L1
+	if l1 == nil {
+		res.Status, res.Summary = checks.Pass, "no L1 checks configured"
+		return res, nil
+	}
+	if l1.NativeCheck != nil && *l1.NativeCheck {
+		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, red))
+	}
+	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
+		res.Evidence = append(res.Evidence, borgArchiveChecks(ctx, d, l1, step.Now, red)...)
+	}
+
+	res.Status = aggregate(res.Evidence)
+	res.Summary = red.Redact(summarize(res.Status, res.Evidence))
+	return res, nil
+}
+
+// nativeCheckEvidence turns `borg check` into one evidence row: OK → pass, errors
+// found → fail (the repo is corrupt), couldn't run → error.
+func nativeCheckEvidence(ctx context.Context, d *borg.Driver, red *redact.Redactor) checks.Evidence {
+	ev := checks.Evidence{Kind: "native_check", Target: "repository", Expected: "borg check passes"}
+	rep, err := d.NativeCheck(ctx, driver.NativeCheckOpts{})
+	switch {
+	case err != nil:
+		ev.Status, ev.Actual = checks.Error, err.Error()
+	case rep.OK:
+		ev.Status, ev.Actual = checks.Pass, rep.Summary
+	default:
+		ev.Status, ev.Actual = checks.Fail, rep.Summary
+	}
+	redactEvidence(red, &ev)
+	return ev
+}
+
+func borgArchiveChecks(ctx context.Context, d *borg.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) []checks.Evidence {
+	snaps, err := d.ListSnapshots(ctx)
+	if err != nil {
+		return []checks.Evidence{{Kind: "snapshot_max_age", Target: "repository", Status: checks.Error, Actual: red.Redact(err.Error())}}
+	}
+	var out []checks.Evidence
+	if l1.SnapshotMaxAge != nil {
+		var newest time.Time
+		if len(snaps) > 0 {
+			newest = snaps[0].Time // ListSnapshots is newest-first
+		}
+		ev, _ := checks.SnapshotMaxAge{Newest: newest, Max: l1.SnapshotMaxAge.Duration()}.Run(ctx, checks.CheckEnv{Now: now})
+		redactEvidence(red, &ev)
+		out = append(out, ev)
+	}
+	if l1.SizeAnomalyPct != nil {
+		if latest, trailing, ok := borgSizes(ctx, d, snaps); ok {
+			ev, _ := checks.SizeAnomaly{LatestSize: latest, TrailingSizes: trailing, Pct: *l1.SizeAnomalyPct}.Run(ctx, checks.CheckEnv{})
+			redactEvidence(red, &ev)
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// borgSizes fetches the latest archive's size plus a bounded trailing window for
+// the anomaly check. It is best-effort and advisory; if even the latest size is
+// unavailable it reports ok=false so the size check is simply skipped.
+func borgSizes(ctx context.Context, d *borg.Driver, snaps []driver.Snapshot) (int64, []int64, bool) {
+	const window = 7
+	if len(snaps) == 0 {
+		return 0, nil, false
+	}
+	latest, err := d.ArchiveSize(ctx, snaps[0].ID)
+	if err != nil {
+		return 0, nil, false
+	}
+	var trailing []int64
+	for i := 1; i < len(snaps) && i <= window; i++ {
+		if sz, e := d.ArchiveSize(ctx, snaps[i].ID); e == nil {
+			trailing = append(trailing, sz)
+		}
+	}
+	return latest, trailing, true
+}
+
+// resolveSecret reads a secret value from a *_file (file contents, trailing
+// newline trimmed) or *_env (env var) reference. Neither set yields "".
+func resolveSecret(file, env string) (string, error) {
+	if file != "" {
+		b, err := os.ReadFile(file) //nolint:gosec // G304: secret-file path is operator-configured
+		if err != nil {
+			return "", fmt.Errorf("read secret file %s: %w", file, err)
+		}
+		return strings.TrimRight(string(b), "\r\n"), nil
+	}
+	if env != "" {
+		return os.Getenv(env), nil
+	}
+	return "", nil
 }

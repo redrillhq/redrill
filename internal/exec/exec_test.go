@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,7 +131,8 @@ func TestRunStepUnsupported(t *testing.T) {
 	t.Parallel()
 	cases := []StepSpec{
 		{Level: "l2", Source: config.Source{Type: "dumpdir"}},
-		{Level: "l1", Source: config.Source{Type: "borg"}},
+		{Level: "l1", Source: config.Source{Type: "restic"}},
+		{Level: "l3", Source: config.Source{Type: "borg"}},
 	}
 	for _, step := range cases {
 		_, err := NewLocal("h").RunStep(context.Background(), step)
@@ -184,6 +187,160 @@ func TestStepResultSerializable(t *testing.T) {
 	if got.Status != checks.Fail || len(got.Evidence) != 1 || got.Evidence[0].Kind != "max_age" {
 		t.Errorf("round-trip mismatch: %+v", got)
 	}
+}
+
+// fakeBorg stands in for the borg binary so the borg L1 glue is unit-testable
+// without a real engine. Subcommand → canned (stderr, exit).
+type fakeBorg struct {
+	validateExit int    // borg list --short
+	listExit     int    // borg list --json
+	checkExit    int    // borg check
+	listJSON     string // borg list --json stdout
+	checkStderr  string // borg check stderr (to test redaction)
+}
+
+func (f fakeBorg) run(_ context.Context, _ string, _ []string, _ string, args []string) ([]byte, []byte, int, error) {
+	if len(args) == 0 {
+		return nil, nil, 0, nil
+	}
+	switch args[0] {
+	case "list":
+		for _, a := range args {
+			if a == "--short" {
+				return nil, []byte("validate error"), f.validateExit, nil
+			}
+		}
+		return []byte(f.listJSON), []byte("list error"), f.listExit, nil
+	case "check":
+		return nil, []byte(f.checkStderr), f.checkExit, nil
+	case "info":
+		return []byte(`{"archives":[{"stats":{"original_size":1000}}]}`), nil, 0, nil
+	}
+	return nil, nil, 0, nil
+}
+
+func borgExecutor(f fakeBorg) *LocalExecutor {
+	e := NewLocal("h")
+	e.borgRunner = f.run
+	return e
+}
+
+// borgListJSON renders archives oldest→newest (as borg does) with the given times.
+func borgListJSON(times ...time.Time) string {
+	var b strings.Builder
+	b.WriteString(`{"archives":[`)
+	for i, tm := range times {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `{"name":"arch-%d","time":%q}`, i+1, tm.In(time.Local).Format("2006-01-02T15:04:05.000000"))
+	}
+	b.WriteString(`]}`)
+	return b.String()
+}
+
+func borgL1() *config.L1 {
+	nc := true
+	sma := config.Duration(36 * time.Hour)
+	return &config.L1{NativeCheck: &nc, SnapshotMaxAge: &sma}
+}
+
+func borgStep(l1 *config.L1, now time.Time) StepSpec {
+	return StepSpec{Level: "l1", Source: config.Source{Name: "borg1", Type: "borg", Repo: "/r"}, L1: l1, Now: now}
+}
+
+func TestRunBorgL1Pass(t *testing.T) {
+	t.Parallel()
+	f := fakeBorg{checkExit: 0, listJSON: borgListJSON(base.Add(-2*time.Hour), base.Add(-1*time.Hour))}
+	res, err := borgExecutor(f).RunStep(context.Background(), borgStep(borgL1(), base))
+	if err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if res.Status != checks.Pass {
+		t.Fatalf("status = %s, want pass (%s)", res.Status, res.Summary)
+	}
+	if len(res.Evidence) != 2 {
+		t.Errorf("evidence = %d, want 2 (native_check, snapshot_max_age)", len(res.Evidence))
+	}
+}
+
+// borg check exit 1 = errors found = the repo is corrupt → fail (the
+// truncated-segment behavior, unit side).
+func TestRunBorgL1NativeCheckFail(t *testing.T) {
+	t.Parallel()
+	f := fakeBorg{checkExit: 1, listJSON: borgListJSON(base.Add(-1 * time.Hour))}
+	res, _ := borgExecutor(f).RunStep(context.Background(), borgStep(borgL1(), base))
+	if res.Status != checks.Fail {
+		t.Fatalf("status = %s, want fail", res.Status)
+	}
+	if got := evidenceByKind(res, "native_check"); got.Status != checks.Fail {
+		t.Errorf("native_check = %s, want fail", got.Status)
+	}
+}
+
+func TestRunBorgL1StaleFail(t *testing.T) {
+	t.Parallel()
+	f := fakeBorg{checkExit: 0, listJSON: borgListJSON(base.Add(-30 * 24 * time.Hour))}
+	res, _ := borgExecutor(f).RunStep(context.Background(), borgStep(borgL1(), base))
+	if res.Status != checks.Fail {
+		t.Fatalf("status = %s, want fail", res.Status)
+	}
+	if got := evidenceByKind(res, "snapshot_max_age"); got.Status != checks.Fail {
+		t.Errorf("snapshot_max_age = %s, want fail", got.Status)
+	}
+}
+
+// An unreachable repo (validate fails) is error, never fail.
+func TestRunBorgL1ValidateError(t *testing.T) {
+	t.Parallel()
+	f := fakeBorg{validateExit: 2}
+	res, _ := borgExecutor(f).RunStep(context.Background(), borgStep(borgL1(), base))
+	if res.Status != checks.Error {
+		t.Errorf("status = %s, want error", res.Status)
+	}
+}
+
+func TestRunBorgL1ListErrorIsError(t *testing.T) {
+	t.Parallel()
+	sma := config.Duration(36 * time.Hour)
+	l1 := &config.L1{SnapshotMaxAge: &sma} // only the age check; no native check
+	f := fakeBorg{listExit: 2}
+	res, _ := borgExecutor(f).RunStep(context.Background(), borgStep(l1, base))
+	if res.Status != checks.Error {
+		t.Errorf("status = %s, want error (couldn't list)", res.Status)
+	}
+}
+
+// The redaction boundary (empty for dumpdir in M5) is real for borg: a secret
+// echoed in borg output must never reach evidence.
+func TestRunBorgL1RedactsSecretInEvidence(t *testing.T) {
+	t.Parallel()
+	passFile := filepath.Join(t.TempDir(), "pass")
+	if err := os.WriteFile(passFile, []byte("topsecret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := fakeBorg{checkExit: 1, checkStderr: "integrity error near topsecret in repo"}
+	step := borgStep(borgL1(), base)
+	step.Source.PassphraseFile = passFile
+	step.Source.Repo = "/r"
+	res, _ := borgExecutor(f).RunStep(context.Background(), step)
+
+	ev := evidenceByKind(res, "native_check")
+	if strings.Contains(ev.Actual, "topsecret") {
+		t.Errorf("secret leaked into evidence: %q", ev.Actual)
+	}
+	if !strings.Contains(ev.Actual, "[REDACTED]") {
+		t.Errorf("expected redaction marker, got %q", ev.Actual)
+	}
+}
+
+func evidenceByKind(res StepResult, kind string) checks.Evidence {
+	for _, ev := range res.Evidence {
+		if ev.Kind == kind {
+			return ev
+		}
+	}
+	return checks.Evidence{}
 }
 
 func TestAggregatePrecedence(t *testing.T) {

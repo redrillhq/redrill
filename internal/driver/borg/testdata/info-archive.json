@@ -1,0 +1,34 @@
+{
+    "archives": [
+        {
+            "command_line": [
+                "/usr/bin/borg",
+                "create",
+                "/tmp/r::arch-2",
+                "."
+            ],
+            "comment": "",
+            "duration": 0.007498,
+            "end": "2026-06-13T18:20:51.000000",
+            "hostname": "d26930b4be38",
+            "id": "724d14a324488c68c52bb61ff53e924dcbc5001ad1838902f8fb0ad900ad5731",
+            "name": "arch-2",
+            "start": "2026-06-13T18:20:51.000000",
+            "stats": {
+                "compressed_size": 98,
+                "deduplicated_size": 817,
+                "nfiles": 2,
+                "original_size": 12
+            },
+            "username": "root"
+        }
+    ],
+    "encryption": {
+        "mode": "repokey"
+    },
+    "repository": {
+        "id": "97344c48bb1f94fba1830b3268a9e0a7942755378149014496c63b896a13a677",
+        "last_modified": "2026-06-13T18:20:51.000000",
+        "location": "/tmp/r"
+    }
+}

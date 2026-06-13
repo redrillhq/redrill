@@ -1,0 +1,58 @@
+version: 1
+data_dir: /var/lib/drillbit
+scratch: { dir: /var/lib/drillbit/scratch, max_bytes: 40GiB }
+concurrency: 1
+notify:
+  urls: ["ntfy://ntfy.example.com/drillbit"]
+  events: [fail, error, recover, stale, weekly_digest]
+
+sources:
+  - name: nextcloud-aio
+    type: borg
+    repo: "ssh://backup@nas.lan/./borg/nextcloud-aio"
+    passphrase_file: /etc/drillbit/secrets/borg-pass
+    ssh_key_file: /etc/drillbit/secrets/borg-ro-key
+  - name: pg-dumps
+    type: dumpdir
+    path: /backups/pg
+    pattern: "*.sql.gz"
+    pick: newest
+
+drills:
+  - name: nextcloud-files
+    source: nextcloud-aio
+    schedule: "Sun 04:10"
+    jitter: 20m
+    max_proof_age: 10d
+    levels:
+      l1: { native_check: true, snapshot_max_age: 36h, size_anomaly_pct: 40 }
+      l2:
+        restore: { scope: sample, sample: { files: 200, newest: 50 } }
+        checks:
+          - path_exists: "config/config.php"   # verify exact path at the M11 dogfood gate
+          - hash_match: true
+          - newest_file_max_age: 8d
+  - name: nextcloud-db
+    source: nextcloud-aio
+    schedule: "Sun 04:40"
+    max_proof_age: 10d
+    levels:
+      l3:
+        extract_path: "nextcloud-aio-database.dump"   # verify at the M11 dogfood gate
+        sandbox: { image: postgres:16, network: none, memory: 1GiB, timeout: 20m }
+        load: auto
+        checks:
+          - sql: { query: "select count(*) from oc_users", expect: "> 0" }
+          - sql_no_error: "select * from oc_filecache limit 1"
+  - name: app-db
+    source: pg-dumps
+    schedule: "Sun 05:10"
+    max_proof_age: 10d
+    levels:
+      l1: { file_min_bytes: 1MiB, compression_test: true, max_age: 36h }
+      l3:
+        sandbox: { image: postgres:16, network: none, memory: 1GiB, timeout: 20m }
+        load: auto
+        checks:
+          - sql: { query: "select count(*) from users", expect: "> 0" }
+          - sql: { query: "select max(created_at) from events", expect: "age < 8d" }

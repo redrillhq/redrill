@@ -1,0 +1,84 @@
+version: 1
+
+data_dir: /var/lib/drillbit          # sqlite db + artifacts
+scratch:
+  dir: /var/lib/drillbit/scratch     # restores happen here
+  max_bytes: 50GiB                   # hard quota; preflight free-space check
+concurrency: 1                       # global single-flight by default (IO discipline)
+bandwidth_limit: 40MiB               # best-effort; passed to engine-native flags where available
+nice: { cpu: 10, io_class: idle }    # applied to spawned engine processes
+
+server:
+  listen: ":8090"
+  basic_auth_file: ""                # optional htpasswd; recommend reverse proxy for TLS
+
+notify:
+  urls:                              # shoutrrr URLs: ntfy, telegram, discord, email, webhook...
+    - "ntfy://ntfy.example.com/drillbit"
+  events: [fail, error, recover, stale, weekly_digest]
+  healthchecks_url: ""               # optional dead-man ping per completed scheduler cycle
+
+sources:
+  - name: nextcloud-borg             # P1 dogfood: Nextcloud AIO backs up via BorgBackup
+    type: borg
+    repo: "ssh://backup@nas.lan/./borg/nextcloud-aio"
+    passphrase_file: /etc/drillbit/secrets/borg-pass
+    ssh_key_file: /etc/drillbit/secrets/borg-readonly-key   # docs: use a read-only key
+    binary: borg                     # optional override / version pin
+
+  - name: app-dumps                  # P1 dogfood: standalone pg_dump cron output
+    type: dumpdir
+    path: /backups/pg
+    pattern: "myapp-*.sql.gz"
+    pick: newest                     # newest | all-matching-window
+
+  - name: photos-restic              # P2 example
+    type: restic
+    repo: "s3:s3.us-west-000.backblazeb2.com/bucket/photos"
+    password_file: /etc/drillbit/secrets/restic-pass
+    env_file: /etc/drillbit/secrets/b2-readonly.env         # restricted key: Get/List only
+
+drills:
+  - name: nextcloud-files
+    source: nextcloud-borg
+    schedule: "Sun 04:10"            # cron or human shorthand; plus jitter
+    jitter: 20m
+    max_proof_age: 10d               # Proof SLA: stale alert if no L2 proof newer than this
+    timeout: 2h
+    levels:
+      l1:
+        native_check: true           # borg check (repo scope)
+        snapshot_max_age: 36h
+        size_anomaly_pct: 40         # latest archive >40% smaller than trailing avg -> warn
+      l2:
+        restore:
+          scope: sample
+          sample: { files: 200, newest: 50 }
+          include_paths: ["config/", "data/admin/files/"]
+        checks:
+          - path_exists: "config/config.php"
+          - hash_match: true                 # restored bytes vs archive metadata
+          - newest_file_max_age: 8d          # freshness: catches stale sources
+          - file_count_tolerance_pct: 15     # vs previous proven run
+
+  - name: myapp-db
+    source: app-dumps
+    schedule: "Sun 05:00"
+    max_proof_age: 10d
+    levels:
+      l1:
+        file_min_bytes: 1MiB
+        compression_test: true       # gzip -t / zstd -t by extension
+        max_age: 36h
+      l3:
+        sandbox:
+          image: postgres:16         # pin to match production major version
+          env: { POSTGRES_PASSWORD: drill }
+          network: none
+          memory: 1GiB
+          timeout: 20m
+        load: auto                   # auto-detect pg_restore vs psql by file format
+        checks:
+          - sql: { query: "select count(*) from users",            expect: "> 100" }
+          - sql: { query: "select max(created_at) from events",    expect: "age < 8d" }
+          - sql_no_error: "select * from orders limit 1"

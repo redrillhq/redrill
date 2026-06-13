@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -92,4 +94,101 @@ func TestVersionJSON(t *testing.T) {
 	if info["version"] != "dev" {
 		t.Errorf("version = %q, want %q", info["version"], "dev")
 	}
+}
+
+const validConfig = `
+version: 1
+data_dir: /v
+scratch: {dir: /s}
+sources: [{name: s, type: borg, repo: r}]
+drills: [{name: d, source: s, schedule: x, levels: {l1: {native_check: true}}}]
+`
+
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestValidate(t *testing.T) {
+	t.Parallel()
+	t.Run("valid config exits 0", func(t *testing.T) {
+		t.Parallel()
+		var stdout, stderr bytes.Buffer
+		path := writeConfig(t, validConfig)
+		if got := run([]string{"validate", "-c", path}, &stdout, &stderr); got != 0 {
+			t.Fatalf("exit = %d, want 0 (stderr: %q)", got, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "is valid") {
+			t.Errorf("stdout = %q, want 'is valid'", stdout.String())
+		}
+	})
+
+	t.Run("invalid config exits 3", func(t *testing.T) {
+		t.Parallel()
+		var stdout, stderr bytes.Buffer
+		path := writeConfig(t, "version: 1\nscratch: {dir: /s}\n") // missing data_dir
+		if got := run([]string{"validate", "-c", path}, &stdout, &stderr); got != 3 {
+			t.Fatalf("exit = %d, want 3", got)
+		}
+		if !strings.Contains(stderr.String(), "data_dir") {
+			t.Errorf("stderr = %q, want it to name the bad field", stderr.String())
+		}
+	})
+
+	t.Run("missing file exits 3", func(t *testing.T) {
+		t.Parallel()
+		var stdout, stderr bytes.Buffer
+		if got := run([]string{"validate", "-c", "/no/such/config.yaml"}, &stdout, &stderr); got != 3 {
+			t.Fatalf("exit = %d, want 3", got)
+		}
+	})
+
+	t.Run("bad flag exits 2", func(t *testing.T) {
+		t.Parallel()
+		var stdout, stderr bytes.Buffer
+		if got := run([]string{"validate", "--frob"}, &stdout, &stderr); got != 2 {
+			t.Fatalf("exit = %d, want 2", got)
+		}
+	})
+
+	t.Run("json valid", func(t *testing.T) {
+		t.Parallel()
+		var stdout, stderr bytes.Buffer
+		path := writeConfig(t, validConfig)
+		if got := run([]string{"validate", "-c", path, "--json"}, &stdout, &stderr); got != 0 {
+			t.Fatalf("exit = %d, want 0", got)
+		}
+		var out struct {
+			Valid bool `json:"valid"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+			t.Fatalf("bad json: %v (%q)", err, stdout.String())
+		}
+		if !out.Valid {
+			t.Errorf("valid = false, want true")
+		}
+	})
+
+	t.Run("json invalid lists errors", func(t *testing.T) {
+		t.Parallel()
+		var stdout, stderr bytes.Buffer
+		path := writeConfig(t, "version: 9\ndata_dir: /v\nscratch: {dir: /s}\n")
+		if got := run([]string{"validate", "-c", path, "--json"}, &stdout, &stderr); got != 3 {
+			t.Fatalf("exit = %d, want 3", got)
+		}
+		var out struct {
+			Valid  bool     `json:"valid"`
+			Errors []string `json:"errors"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+			t.Fatalf("bad json: %v (%q)", err, stdout.String())
+		}
+		if out.Valid || len(out.Errors) == 0 {
+			t.Errorf("want valid=false with errors, got %+v", out)
+		}
+	})
 }

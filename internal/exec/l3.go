@@ -95,6 +95,43 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red)
 }
 
+func (e *LocalExecutor) runResticL3(ctx context.Context, step StepSpec) (StepResult, error) {
+	res := StepResult{Level: step.Level}
+	if e.sandbox == nil {
+		return StepResult{}, ErrNoSandboxRuntime
+	}
+	if step.L3 == nil || step.L3.ExtractPath == "" {
+		return errorStep(res, "restic L3 requires extract_path"), nil
+	}
+	d, red, err := e.resticDriver(step.Source)
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	if err := d.Validate(ctx); err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+	snaps, err := d.ListSnapshots(ctx)
+	if err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+	if len(snaps) == 0 {
+		return errorStep(res, "no snapshots in repository"), nil
+	}
+	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	defer sc.cleanup()
+	extractDir := filepath.Join(sc.root, "extract")
+	if err := os.MkdirAll(extractDir, 0o700); err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{snaps[0].ID}, Paths: []string{step.L3.ExtractPath}}, extractDir); err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red)
+}
+
 func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scratch, dumpSrc string, red *redact.Redactor) (StepResult, error) {
 	res := StepResult{Level: step.Level}
 	l3 := step.L3

@@ -21,6 +21,9 @@ import (
 //	borg    L1  pass: valid repo, snapshot in window  fail: stale-source / truncated-segment
 //	borg    L2  pass: all expected paths present      fail: missing-data-dir
 //	borg    L3  pass: dump extracted + booted         fail: shares loadAndCheck with dumpdir L3
+//	restic  L1  pass: valid repo, snapshot in window  fail: restic-stale-source / restic-missing-pack
+//	restic  L2  pass: all expected paths present      fail: restic-missing-data-dir
+//	restic  L3  pass: dump extracted + booted         fail: shares loadAndCheck with dumpdir L3
 
 func TestIntegrationBorgL1L2(t *testing.T) {
 	fixtures.RequireBorg(t)
@@ -85,5 +88,44 @@ func TestIntegrationBorgL3(t *testing.T) {
 	})
 	if res.Status != store.ResultPass {
 		t.Fatalf("borg L3 = %s, want pass; levels = %+v", res.Status, res.Levels)
+	}
+}
+
+func TestIntegrationResticL1L2(t *testing.T) {
+	fixtures.RequireRestic(t)
+	repo, passFile := fixtures.Restic(t)
+	res := runResticDrill(t, repo, passFile, resticL1L2Drill())
+	if res.Status != store.ResultPass {
+		t.Fatalf("L1+L2 restic drill = %s, want pass; levels = %+v", res.Status, res.Levels)
+	}
+	if res.LevelReached != "l2" {
+		t.Errorf("level reached %s, want l2", res.LevelReached)
+	}
+}
+
+// restic L1 near-pass: a snapshot just inside the recency window passes — the
+// boundary mirror of TestSabotageStaleSourceRestic's 30-day snapshot.
+func TestIntegrationResticL1NearPass(t *testing.T) {
+	fixtures.RequireRestic(t)
+	repo, passFile := fixtures.Restic(t, fixtures.ResticSnapshotAge(35*time.Hour)) // window is 36h
+	res := runResticDrill(t, repo, passFile, resticStaleDrill())
+	if res.Status != store.ResultPass {
+		t.Fatalf("restic L1 near-pass = %s, want pass (35h snapshot within a 36h window); levels = %+v", res.Status, res.Levels)
+	}
+}
+
+// restic L3: a Postgres dump lives inside a restic snapshot; redrill extracts it
+// via extract_path, boots a sandbox, and asserts against it. Needs restic + Docker.
+func TestIntegrationResticL3(t *testing.T) {
+	fixtures.RequireRestic(t)
+	rt := requireDocker(t)
+	repo, passFile := fixtures.Restic(t, fixtures.ResticFile("db.dump",
+		"CREATE TABLE users(id int);\nINSERT INTO users VALUES (1),(2),(3);\n"))
+	res := runResticL3Drill(t, rt, repo, passFile, "db.dump", pgImage(), []config.Check{
+		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
+		{Kind: "sql_no_error", SQLNoError: "select * from users limit 1"},
+	})
+	if res.Status != store.ResultPass {
+		t.Fatalf("restic L3 = %s, want pass; levels = %+v", res.Status, res.Levels)
 	}
 }

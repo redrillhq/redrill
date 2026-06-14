@@ -3,8 +3,6 @@ package exec
 import (
 	"context"
 	"strconv"
-
-	"github.com/alyamovsky/redrill/internal/driver/borg"
 )
 
 // IOPolicy throttles spawned engine processes.
@@ -49,14 +47,15 @@ func ioClassNum(class string) int {
 	}
 }
 
-// wrapIOPolicy returns a Runner that applies nice/ionice; an inert policy returns
-// base unchanged so the common (no-policy) path stays a plain exec.
-func wrapIOPolicy(base borg.Runner, p IOPolicy) borg.Runner {
+// wrapIO returns a runner that applies nice/ionice; an inert policy returns base
+// unchanged so the common (no-policy) path stays a plain exec. Generic over the
+// engine Runner types (borg.Runner, restic.Runner) — same underlying signature.
+func wrapIO[T ~func(context.Context, string, []string, string, []string) ([]byte, []byte, int, error)](base T, p IOPolicy) T {
 	if !p.wraps() {
 		return base
 	}
-	return func(ctx context.Context, dir string, env []string, name string, args []string) ([]byte, []byte, int, error) {
+	return T(func(ctx context.Context, dir string, env []string, name string, args []string) ([]byte, []byte, int, error) {
 		wname, wargs := p.decorate(name, args)
 		return base(ctx, dir, env, wname, wargs)
-	}
+	})
 }

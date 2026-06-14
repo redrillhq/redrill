@@ -72,7 +72,7 @@ func collectDoctor(ctx context.Context, cfg *config.Config) []doctorCheck {
 
 func engineChecks(ctx context.Context, cfg *config.Config) []doctorCheck {
 	var out []doctorCheck
-	borgBin := ""
+	borgBin, resticBin := "", ""
 	hasBorg, hasRestic := false, false
 	for i := range cfg.Sources {
 		switch cfg.Sources[i].Type {
@@ -83,6 +83,9 @@ func engineChecks(ctx context.Context, cfg *config.Config) []doctorCheck {
 			}
 		case "restic":
 			hasRestic = true
+			if cfg.Sources[i].Binary != "" {
+				resticBin = cfg.Sources[i].Binary
+			}
 		}
 	}
 	if hasBorg {
@@ -92,8 +95,10 @@ func engineChecks(ctx context.Context, cfg *config.Config) []doctorCheck {
 		out = append(out, binaryCheck(ctx, "borg", borgBin, "--version"))
 	}
 	if hasRestic {
-		out = append(out, doctorCheck{Name: "engine: restic", Status: statusWarn,
-			Detail: "restic driver not implemented yet; restic drills will error"})
+		if resticBin == "" {
+			resticBin = "restic"
+		}
+		out = append(out, binaryCheck(ctx, "restic", resticBin, "version"))
 	}
 	return out
 }
@@ -175,7 +180,7 @@ func repoCheck(ctx context.Context, src config.Source) doctorCheck {
 	case err == nil:
 		return doctorCheck{Name: name, Status: statusOK, Detail: "reachable (" + src.Type + ")"}
 	case errors.Is(err, exec.ErrUnsupported):
-		return doctorCheck{Name: name, Status: statusWarn, Detail: "restic driver not implemented yet"}
+		return doctorCheck{Name: name, Status: statusWarn, Detail: firstLine(err.Error())}
 	default:
 		return doctorCheck{Name: name, Status: statusErr, Detail: firstLine(err.Error())}
 	}

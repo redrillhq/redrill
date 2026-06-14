@@ -15,6 +15,7 @@ import (
 	"github.com/alyamovsky/redrill/internal/driver"
 	"github.com/alyamovsky/redrill/internal/driver/borg"
 	"github.com/alyamovsky/redrill/internal/driver/dumpdir"
+	"github.com/alyamovsky/redrill/internal/driver/restic"
 	"github.com/alyamovsky/redrill/internal/redact"
 	"github.com/alyamovsky/redrill/internal/sandbox"
 )
@@ -59,10 +60,11 @@ type Executor interface {
 }
 
 type LocalExecutor struct {
-	host       string
-	borgRunner borg.Runner            // nil = the real borg binary; tests inject a fake
-	sandbox    sandbox.SandboxRuntime // nil = no L3 runtime → L3 skipped
-	io         IOPolicy
+	host         string
+	borgRunner   borg.Runner            // nil = the real borg binary; tests inject a fake
+	resticRunner restic.Runner          // nil = the real restic binary; tests inject a fake
+	sandbox      sandbox.SandboxRuntime // nil = no L3 runtime → L3 skipped
+	io           IOPolicy
 }
 
 func NewLocal(host string) *LocalExecutor { return &LocalExecutor{host: host} }
@@ -90,7 +92,22 @@ func (e *LocalExecutor) newBorg(src config.Source, passphrase string) *borg.Driv
 		borg.WithPassphrase(passphrase),
 		borg.WithSSHKey(src.SSHKeyFile),
 		borg.WithUploadRateLimit(e.io.BandwidthKiB),
-		borg.WithRunner(wrapIOPolicy(base, e.io)),
+		borg.WithRunner(wrapIO(base, e.io)),
+	)
+}
+
+// newRestic builds the restic driver with the IO policy applied.
+func (e *LocalExecutor) newRestic(src config.Source, password string, backendEnv map[string]string) *restic.Driver {
+	base := e.resticRunner
+	if base == nil {
+		base = restic.ExecRunner
+	}
+	return restic.New(src.Repo,
+		restic.WithBinary(src.Binary),
+		restic.WithPassword(password),
+		restic.WithBackendEnv(backendEnv),
+		restic.WithDownloadRateLimit(e.io.BandwidthKiB),
+		restic.WithRunner(wrapIO(base, e.io)),
 	)
 }
 
@@ -112,6 +129,12 @@ func (e *LocalExecutor) RunStep(ctx context.Context, step StepSpec) (StepResult,
 		return e.runDumpdirL3(ctx, step)
 	case step.Level == "l3" && step.Source.Type == "borg":
 		return e.runBorgL3(ctx, step)
+	case step.Level == "l1" && step.Source.Type == "restic":
+		return e.runResticL1(ctx, step)
+	case step.Level == "l2" && step.Source.Type == "restic":
+		return e.runResticL2(ctx, step)
+	case step.Level == "l3" && step.Source.Type == "restic":
+		return e.runResticL3(ctx, step)
 	default:
 		return StepResult{}, fmt.Errorf("%w: level %q source %q", ErrUnsupported, step.Level, step.Source.Type)
 	}
@@ -137,7 +160,26 @@ func ValidateSource(ctx context.Context, src config.Source) error {
 		}
 		return nil
 	case "restic":
-		return fmt.Errorf("%w: source type restic", ErrUnsupported)
+		password, err := resolveSecret(src.PasswordFile, src.PasswordEnv)
+		if err != nil {
+			return err
+		}
+		backendEnv, err := resolveBackendEnv(src.EnvFile)
+		if err != nil {
+			return err
+		}
+		red := redact.New()
+		red.AddSecret(password)
+		for k, v := range backendEnv {
+			red.AddEnv(k, v)
+		}
+		d := restic.New(src.Repo,
+			restic.WithBinary(src.Binary), restic.WithPassword(password), restic.WithBackendEnv(backendEnv),
+		)
+		if err := d.Validate(ctx); err != nil {
+			return errors.New(red.Redact(err.Error()))
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown source type %q", src.Type)
 	}
@@ -277,9 +319,61 @@ func (e *LocalExecutor) runBorgL1(ctx context.Context, step StepSpec) (StepResul
 	return res, nil
 }
 
+// resticDriver resolves restic secrets, seeds a redactor with them, and builds
+// the driver with the IO policy applied.
+func (e *LocalExecutor) resticDriver(src config.Source) (*restic.Driver, *redact.Redactor, error) {
+	password, err := resolveSecret(src.PasswordFile, src.PasswordEnv)
+	if err != nil {
+		return nil, nil, err
+	}
+	backendEnv, err := resolveBackendEnv(src.EnvFile)
+	if err != nil {
+		return nil, nil, err
+	}
+	red := redact.New()
+	red.AddSecret(password)
+	for k, v := range backendEnv {
+		red.AddEnv(k, v) // redact secret-named values (keys/tokens), not benign ones (region, endpoint)
+	}
+	return e.newRestic(src, password, backendEnv), red, nil
+}
+
+func (e *LocalExecutor) runResticL1(ctx context.Context, step StepSpec) (StepResult, error) {
+	res := StepResult{Level: step.Level}
+	d, red, err := e.resticDriver(step.Source)
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	if err := d.Validate(ctx); err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+
+	l1 := step.L1
+	if l1 == nil {
+		res.Status, res.Summary = checks.Pass, "no L1 checks configured"
+		return res, nil
+	}
+	if l1.NativeCheck != nil && *l1.NativeCheck {
+		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, red))
+	}
+	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
+		res.Evidence = append(res.Evidence, resticArchiveChecks(ctx, d, l1, step.Now, red)...)
+	}
+
+	res.Status = aggregate(res.Evidence)
+	res.Summary = red.Redact(summarize(res.Status, res.Evidence))
+	return res, nil
+}
+
+// nativeChecker is the slice of a SourceDriver the native-check evidence needs.
+type nativeChecker interface {
+	Name() string
+	NativeCheck(ctx context.Context, opts driver.NativeCheckOpts) (driver.Report, error)
+}
+
 // nativeCheckEvidence: OK → pass, errors → fail, couldn't run → error.
-func nativeCheckEvidence(ctx context.Context, d *borg.Driver, red *redact.Redactor) checks.Evidence {
-	ev := checks.Evidence{Kind: "native_check", Target: "repository", Expected: "borg check passes"}
+func nativeCheckEvidence(ctx context.Context, d nativeChecker, red *redact.Redactor) checks.Evidence {
+	ev := checks.Evidence{Kind: "native_check", Target: "repository", Expected: d.Name() + " check passes"}
 	rep, err := d.NativeCheck(ctx, driver.NativeCheckOpts{})
 	switch {
 	case err != nil:
@@ -298,6 +392,20 @@ func borgArchiveChecks(ctx context.Context, d *borg.Driver, l1 *config.L1, now t
 	if err != nil {
 		return []checks.Evidence{{Kind: "snapshot_max_age", Target: "repository", Status: checks.Error, Actual: red.Redact(err.Error())}}
 	}
+	return archiveAgeAndSize(ctx, snaps, l1, now, red, d.ArchiveSize)
+}
+
+func resticArchiveChecks(ctx context.Context, d *restic.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) []checks.Evidence {
+	snaps, err := d.ListSnapshots(ctx)
+	if err != nil {
+		return []checks.Evidence{{Kind: "snapshot_max_age", Target: "repository", Status: checks.Error, Actual: red.Redact(err.Error())}}
+	}
+	return archiveAgeAndSize(ctx, snaps, l1, now, red, d.SnapshotSize)
+}
+
+// archiveAgeAndSize builds the snapshot_max_age and size_anomaly evidence shared
+// by the repository engines (borg, restic); sizeFn fetches a snapshot's size.
+func archiveAgeAndSize(ctx context.Context, snaps []driver.Snapshot, l1 *config.L1, now time.Time, red *redact.Redactor, sizeFn func(context.Context, string) (int64, error)) []checks.Evidence {
 	var out []checks.Evidence
 	if l1.SnapshotMaxAge != nil {
 		var newest time.Time
@@ -309,7 +417,7 @@ func borgArchiveChecks(ctx context.Context, d *borg.Driver, l1 *config.L1, now t
 		out = append(out, ev)
 	}
 	if l1.SizeAnomalyPct != nil {
-		if latest, trailing, ok := borgSizes(ctx, d, snaps); ok {
+		if latest, trailing, ok := snapSizes(ctx, snaps, sizeFn); ok {
 			ev, _ := checks.SizeAnomaly{LatestSize: latest, TrailingSizes: trailing, Pct: *l1.SizeAnomalyPct}.Run(ctx, checks.CheckEnv{})
 			redactEvidence(red, &ev)
 			out = append(out, ev)
@@ -318,19 +426,19 @@ func borgArchiveChecks(ctx context.Context, d *borg.Driver, l1 *config.L1, now t
 	return out
 }
 
-// borgSizes is best-effort: an unavailable latest size yields ok=false.
-func borgSizes(ctx context.Context, d *borg.Driver, snaps []driver.Snapshot) (int64, []int64, bool) {
+// snapSizes is best-effort: an unavailable latest size yields ok=false.
+func snapSizes(ctx context.Context, snaps []driver.Snapshot, sizeFn func(context.Context, string) (int64, error)) (int64, []int64, bool) {
 	const window = 7
 	if len(snaps) == 0 {
 		return 0, nil, false
 	}
-	latest, err := d.ArchiveSize(ctx, snaps[0].ID)
+	latest, err := sizeFn(ctx, snaps[0].ID)
 	if err != nil {
 		return 0, nil, false
 	}
 	var trailing []int64
 	for i := 1; i < len(snaps) && i <= window; i++ {
-		if sz, e := d.ArchiveSize(ctx, snaps[i].ID); e == nil {
+		if sz, e := sizeFn(ctx, snaps[i].ID); e == nil {
 			trailing = append(trailing, sz)
 		}
 	}
@@ -351,6 +459,38 @@ func resolveSecret(file, env string) (string, error) {
 		return os.Getenv(env), nil
 	}
 	return "", nil
+}
+
+// resolveBackendEnv parses a dotenv-style file (KEY=VALUE per line) of backend
+// credentials (S3/B2 keys); an empty path yields a nil map.
+func resolveBackendEnv(file string) (map[string]string, error) {
+	if file == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(file) //nolint:gosec // G304: env-file path is operator-configured
+	if err != nil {
+		return nil, fmt.Errorf("read env file %s: %w", file, err)
+	}
+	return parseEnvFile(string(b)), nil
+}
+
+func parseEnvFile(s string) map[string]string {
+	env := map[string]string{}
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		if k = strings.TrimSpace(k); k != "" {
+			env[k] = strings.Trim(strings.TrimSpace(v), `"'`)
+		}
+	}
+	return env
 }
 
 func (e *LocalExecutor) runBorgL2(ctx context.Context, step StepSpec) (StepResult, error) {
@@ -402,6 +542,55 @@ func (e *LocalExecutor) runBorgL2(ctx context.Context, step StepSpec) (StepResul
 		return errorStep(res, err.Error()), nil
 	}
 	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{archive}, Paths: paths}, sc.root); err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+	return finishL2(ctx, res, sc.root, l2.Checks, step, red), nil
+}
+
+func (e *LocalExecutor) runResticL2(ctx context.Context, step StepSpec) (StepResult, error) {
+	res := StepResult{Level: step.Level}
+	l2 := step.L2
+	if l2 == nil {
+		res.Status, res.Summary = checks.Pass, "no L2 config"
+		return res, nil
+	}
+	d, red, err := e.resticDriver(step.Source)
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	if err := d.Validate(ctx); err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+	snaps, err := d.ListSnapshots(ctx)
+	if err != nil {
+		return errorStep(res, red.Redact(err.Error())), nil
+	}
+	if len(snaps) == 0 {
+		return errorStep(res, "no snapshots in repository"), nil
+	}
+	id := snaps[0].ID // newest
+
+	var paths []string
+	var predicted int64
+	if l2.Restore.Scope == "full" {
+		predicted, _ = d.SnapshotSize(ctx, id) // best-effort; quota still bounds it
+	} else {
+		files, err := d.ListFiles(ctx, id)
+		if err != nil {
+			return errorStep(res, red.Redact(err.Error())), nil
+		}
+		paths, predicted = selectSample(files, l2.Restore.Sample, l2.Restore.IncludePaths, uint64(step.RunID)) //nolint:gosec // G115: run ids are positive
+	}
+
+	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	defer sc.cleanup()
+	if err := sc.preflight(predicted); err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{id}, Paths: paths}, sc.root); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
 	return finishL2(ctx, res, sc.root, l2.Checks, step, red), nil

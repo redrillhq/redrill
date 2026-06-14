@@ -139,10 +139,10 @@ func (l *L3) validate(path, srcType string, es *errset) {
 	if l.Load != "" && l.Load != "auto" && l.Load != "pg_restore" && l.Load != "psql" {
 		es.add(path+".load", "must be auto, pg_restore, or psql, got %q", l.Load)
 	}
-	// borg archives hold a tree, so L3 needs to know which dump to extract; a
-	// dumpdir source is already a single file.
-	if srcType == "borg" && l.ExtractPath == "" {
-		es.add(path+".extract_path", "required for a borg L3 (the dump to extract from the archive)")
+	// borg/restic snapshots hold a tree, so L3 needs to know which dump to
+	// extract; a dumpdir source is already a single file.
+	if (srcType == "borg" || srcType == "restic") && l.ExtractPath == "" {
+		es.add(path+".extract_path", "required for a %s L3 (the dump to extract from the snapshot)", srcType)
 	}
 	// Without a check an L3 could boot, load, and silently pass while proving
 	// nothing.

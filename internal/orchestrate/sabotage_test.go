@@ -108,6 +108,39 @@ func TestSabotageMissingDataDir(t *testing.T) {
 	assertCaught(t, res, "path_exists")
 }
 
+// restic-stale-source (restic L1 snapshot_max_age): newest snapshot 30 days old.
+func TestSabotageStaleSourceRestic(t *testing.T) {
+	fixtures.RequireRestic(t)
+	repo, passFile := fixtures.Restic(t, fixtures.ResticSnapshotAge(30*24*time.Hour))
+	res := runResticDrill(t, repo, passFile, resticStaleDrill())
+	mustFail(t, res, "restic-stale-source")
+	assertCaught(t, res, "snapshot_max_age")
+}
+
+// restic-missing-pack (restic L1 native check): a deleted pack file — restic's
+// own check must flag it, proving redrill delegates integrity to restic check.
+func TestSabotageMissingPackRestic(t *testing.T) {
+	fixtures.RequireRestic(t)
+	repo, passFile := fixtures.Restic(t)
+
+	if err := os.Remove(largestFile(t, repo+"/data")); err != nil {
+		t.Fatal(err)
+	}
+
+	res := runResticDrill(t, repo, passFile, resticNativeOnlyDrill())
+	mustFail(t, res, "restic-missing-pack")
+	assertCaught(t, res, "native_check")
+}
+
+// restic-missing-data-dir (restic L2 path_exists): a bad exclude dropped data/.
+func TestSabotageMissingDataDirRestic(t *testing.T) {
+	fixtures.RequireRestic(t)
+	repo, passFile := fixtures.Restic(t, fixtures.ResticOmitData())
+	res := runResticDrill(t, repo, passFile, resticL1L2Drill())
+	mustFail(t, res, "restic-missing-data-dir")
+	assertCaught(t, res, "path_exists")
+}
+
 // wrong-db-dump (dumpdir L3 sql): a valid dump of the wrong/empty database.
 func TestSabotageWrongDBDump(t *testing.T) {
 	rt := requireDocker(t)

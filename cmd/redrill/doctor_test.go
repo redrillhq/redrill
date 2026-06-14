@@ -68,24 +68,26 @@ func TestDoctor(t *testing.T) {
 		}
 	})
 
-	t.Run("restic source warns but does not fail", func(t *testing.T) {
+	t.Run("restic is a real engine: missing binary or unreachable repo errors", func(t *testing.T) {
 		t.Parallel()
+		// Deterministic regardless of host: if restic is absent the binary check
+		// errors; if present, the bogus repo is unreachable — either way, exit 2.
 		tmp := t.TempDir()
 		cfg := writeConfig(t, fmt.Sprintf(`version: 1
 data_dir: %s
 scratch: {dir: %s}
 sources:
   - {name: dumps, type: dumpdir, path: %s, pattern: "*.sql.gz"}
-  - {name: photos, type: restic, repo: "s3:example/photos", password_env: RESTIC_PW}
+  - {name: photos, type: restic, repo: "/no/such/restic/repo", password_env: RESTIC_PW}
 drills:
   - {name: app-db, source: dumps, schedule: "Sun 05:00", levels: {l1: {max_age: 36h}}}
 `, filepath.Join(tmp, "data"), filepath.Join(tmp, "scratch"), t.TempDir()))
 		var out, errb bytes.Buffer
-		if code := run([]string{"doctor", "-c", cfg}, &out, &errb); code != 0 {
-			t.Fatalf("exit = %d, want 0 (restic is a warn, not an error)\n%s", code, out.String())
+		if code := run([]string{"doctor", "-c", cfg}, &out, &errb); code != 2 {
+			t.Fatalf("exit = %d, want 2 (restic now a real engine)\n%s", code, out.String())
 		}
-		if !strings.Contains(out.String(), "WARN") {
-			t.Errorf("want a WARN row for restic, got:\n%s", out.String())
+		if !strings.Contains(out.String(), "ERROR") {
+			t.Errorf("want an ERROR row for restic, got:\n%s", out.String())
 		}
 	})
 }

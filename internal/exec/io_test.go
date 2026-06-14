@@ -43,7 +43,7 @@ func TestWrapIOPolicyInertReturnsBase(t *testing.T) {
 		gotName, gotArgs = name, args
 		return nil, nil, 0, nil
 	}
-	_, _, _, _ = wrapIOPolicy(borg.Runner(base), IOPolicy{})(context.Background(), "", nil, "borg", []string{"check", "/r"})
+	_, _, _, _ = wrapIO(borg.Runner(base), IOPolicy{})(context.Background(), "", nil, "borg", []string{"check", "/r"})
 	if gotName != "borg" || !reflect.DeepEqual(gotArgs, []string{"check", "/r"}) {
 		t.Errorf("inert policy altered the command: %q %v", gotName, gotArgs)
 	}
@@ -58,7 +58,7 @@ func TestWrapIOPolicyDecorates(t *testing.T) {
 		return nil, nil, 0, nil
 	}
 	p := IOPolicy{NiceCPU: 12, IOClass: "idle"}
-	_, _, _, _ = wrapIOPolicy(borg.Runner(base), p)(context.Background(), "", nil, "borg", []string{"check", "/r"})
+	_, _, _, _ = wrapIO(borg.Runner(base), p)(context.Background(), "", nil, "borg", []string{"check", "/r"})
 	want := []string{"-n", "12", "ionice", "-c", "3", "borg", "check", "/r"}
 	if gotName != "nice" || !reflect.DeepEqual(gotArgs, want) {
 		t.Errorf("wrapped = %q %v, want nice %v", gotName, gotArgs, want)
@@ -89,6 +89,36 @@ func TestRunBorgL1AppliesIOPolicy(t *testing.T) {
 	}
 	for _, call := range calls {
 		if call[0] != "nice" || !containsArg(call, "ionice") || !containsArg(call, "borg") {
+			t.Errorf("call not IO-wrapped: %v", call)
+		}
+	}
+}
+
+// nice/ionice must reach every restic invocation too — the IO discipline is
+// engine-agnostic.
+func TestRunResticL1AppliesIOPolicy(t *testing.T) {
+	t.Parallel()
+	var calls [][]string
+	capture := func(_ context.Context, _ string, _ []string, name string, args []string) ([]byte, []byte, int, error) {
+		call := append([]string{name}, args...)
+		calls = append(calls, call)
+		if containsArg(call, "snapshots") {
+			return []byte(resticSnapshotsJSON(base.Add(-1 * time.Hour))), nil, 0, nil
+		}
+		return nil, nil, 0, nil
+	}
+	e := NewLocal("h")
+	e.resticRunner = capture
+	e.WithIOPolicy(IOPolicy{NiceCPU: 10, IOClass: "idle"})
+
+	if _, err := e.RunStep(context.Background(), resticStep(resticL1(), base)); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if len(calls) == 0 {
+		t.Fatal("no restic invocations recorded")
+	}
+	for _, call := range calls {
+		if call[0] != "nice" || !containsArg(call, "ionice") || !containsArg(call, "restic") {
 			t.Errorf("call not IO-wrapped: %v", call)
 		}
 	}

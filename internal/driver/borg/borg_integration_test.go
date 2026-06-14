@@ -66,7 +66,7 @@ func write(t *testing.T, path, body string) {
 
 func runBorg(t *testing.T, dir string, env []string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("borg", args...)
+	cmd := exec.CommandContext(t.Context(), "borg", args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {

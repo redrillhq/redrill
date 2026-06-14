@@ -1,0 +1,4 @@
+[
+{"time":"2026-06-12T18:20:51.111111111Z","tree":"1e00236c38afbde3b430c267c8a9ccc7840b2e06e3387d56641b5f89a5494700","paths":["/tmp/src"],"hostname":"02bbe91edfe6","username":"root","program_version":"restic 0.18.1","summary":{"files_new":3,"total_bytes_processed":1631},"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","short_id":"aaaaaaaa"},
+{"time":"2026-06-14T20:50:08.000692087Z","tree":"2e00236c38afbde3b430c267c8a9ccc7840b2e06e3387d56641b5f89a54947f8","paths":["/tmp/src"],"hostname":"02bbe91edfe6","username":"root","program_version":"restic 0.18.1","summary":{"files_new":3,"total_bytes_processed":1631},"id":"f6973a36e9ae5160f26c15f97dd660c1438fc41c9b56e4ecb1d020d753554019","short_id":"f6973a36"}
+]

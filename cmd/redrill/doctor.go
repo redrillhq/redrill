@@ -9,6 +9,8 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -92,18 +94,35 @@ func engineChecks(ctx context.Context, cfg *config.Config) []doctorCheck {
 		if borgBin == "" {
 			borgBin = "borg"
 		}
-		out = append(out, binaryCheck(ctx, "borg", borgBin, "--version"))
+		out = append(out, binaryCheck(ctx, "borg", borgBin, borgVersions, "--version"))
 	}
 	if hasRestic {
 		if resticBin == "" {
 			resticBin = "restic"
 		}
-		out = append(out, binaryCheck(ctx, "restic", resticBin, "version"))
+		out = append(out, binaryCheck(ctx, "restic", resticBin, resticVersions, "version"))
 	}
 	return out
 }
 
-func binaryCheck(ctx context.Context, label, bin string, versionArgs ...string) doctorCheck {
+// Supported engine version bands (the versions redrill's parsers are written and
+// tested against). borg is 1.x only — borg 2.x changed the CLI/JSON and timestamp
+// format the driver relies on. restic is 0.17+ (the ls --json message_type field).
+var (
+	borgVersions   = versionRange{label: "borg", minMajor: 1, minMinor: 2, unsupportedMajor: 2}
+	resticVersions = versionRange{label: "restic", minMajor: 0, minMinor: 17}
+)
+
+// versionRange is the engine version band redrill is tested against. A version
+// outside it is a warn — the binary ran, but its output may be misparsed — never
+// a hard error.
+type versionRange struct {
+	label              string
+	minMajor, minMinor int
+	unsupportedMajor   int // a major >= this is unverified (0 = no ceiling)
+}
+
+func binaryCheck(ctx context.Context, label, bin string, vr versionRange, versionArgs ...string) doctorCheck {
 	name := "engine: " + label
 	if _, err := osexec.LookPath(bin); err != nil {
 		return doctorCheck{Name: name, Status: statusErr, Detail: bin + " not found on PATH"}
@@ -112,7 +131,32 @@ func binaryCheck(ctx context.Context, label, bin string, versionArgs ...string) 
 	if err != nil {
 		return doctorCheck{Name: name, Status: statusErr, Detail: bin + ": " + err.Error()}
 	}
-	return doctorCheck{Name: name, Status: statusOK, Detail: firstLine(string(out))}
+	detail := firstLine(string(out))
+	if msg, ok := vr.check(detail); !ok {
+		return doctorCheck{Name: name, Status: statusWarn, Detail: detail + " — " + msg}
+	}
+	return doctorCheck{Name: name, Status: statusOK, Detail: detail}
+}
+
+var engineVersionRe = regexp.MustCompile(`(\d+)\.(\d+)`)
+
+// check reports whether a "name X.Y.Z" version line falls in the tested band, with
+// an explanatory message when it does not. An unparseable line is left alone — a
+// binary that answered is better trusted than second-guessed.
+func (vr versionRange) check(versionLine string) (string, bool) {
+	m := engineVersionRe.FindStringSubmatch(versionLine)
+	if m == nil {
+		return "", true
+	}
+	maj, _ := strconv.Atoi(m[1])
+	min, _ := strconv.Atoi(m[2])
+	if vr.unsupportedMajor > 0 && maj >= vr.unsupportedMajor {
+		return fmt.Sprintf("redrill targets %s %d.x; %d.%d is unverified and may be misread", vr.label, vr.unsupportedMajor-1, maj, min), false
+	}
+	if maj < vr.minMajor || (maj == vr.minMajor && min < vr.minMinor) {
+		return fmt.Sprintf("older than the tested minimum %s %d.%d", vr.label, vr.minMajor, vr.minMinor), false
+	}
+	return "", true
 }
 
 func runtimeCheck(ctx context.Context, cfg *config.Config) doctorCheck {

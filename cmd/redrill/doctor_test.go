@@ -92,6 +92,33 @@ drills:
 	})
 }
 
+func TestEngineVersionRangeCheck(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		vr   versionRange
+		line string
+		ok   bool
+	}{
+		{"borg 1.4 ok", borgVersions, "borg 1.4.4", true},
+		{"borg 1.2 ok (min)", borgVersions, "borg 1.2.0", true},
+		{"borg 1.1 too old", borgVersions, "borg 1.1.18", false},
+		{"borg 2.x unverified", borgVersions, "borg 2.0.0", false},
+		{"restic 0.18 ok", resticVersions, "restic 0.18.1 compiled with go1.26.3 on linux/arm64", true},
+		{"restic 0.17 ok (min)", resticVersions, "restic 0.17.0", true},
+		{"restic 0.16 too old", resticVersions, "restic 0.16.4", false},
+		{"unparseable is left alone", borgVersions, "borg (unknown build)", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if _, ok := tt.vr.check(tt.line); ok != tt.ok {
+				t.Errorf("check(%q) ok = %v, want %v", tt.line, ok, tt.ok)
+			}
+		})
+	}
+}
+
 func TestDoctorJSON(t *testing.T) {
 	t.Parallel()
 	cfg := setupDoctorConfig(t, "/no/such/backup/dir")

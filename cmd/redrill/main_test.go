@@ -104,7 +104,7 @@ version: 1
 data_dir: /v
 scratch: {dir: /s}
 sources: [{name: s, type: borg, repo: r}]
-drills: [{name: d, source: s, schedule: x, levels: {l1: {native_check: true}}}]
+drills: [{name: d, source: s, schedule: "Sun 04:10", levels: {l1: {native_check: true}}}]
 `
 
 func writeConfig(t *testing.T, body string) string {

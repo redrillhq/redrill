@@ -20,6 +20,7 @@ import (
 	"github.com/alyamovsky/redrill/internal/exec"
 	"github.com/alyamovsky/redrill/internal/orchestrate"
 	"github.com/alyamovsky/redrill/internal/sandbox/docker"
+	"github.com/alyamovsky/redrill/internal/scheduler"
 	"github.com/alyamovsky/redrill/internal/store"
 )
 
@@ -40,6 +41,9 @@ Usage:
 Commands:
   validate   strictly check a config file
   run        run one drill now and print the result
+  status     show each drill's last run, proof age, next run, and SLA state
+  history    show a drill's past runs
+  serve      run the scheduler daemon
   version    print version information
 
 Exit codes: 0 ok · 1 drill fail · 2 infra error · 3 config error
@@ -59,6 +63,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runValidate(args[1:], stdout, stderr)
 	case "run":
 		return runRun(args[1:], stdout, stderr)
+	case "status":
+		return runStatus(args[1:], stdout, stderr)
+	case "history":
+		return runHistory(args[1:], stdout, stderr)
+	case "serve":
+		return runServe(args[1:], stdout, stderr)
 	case "version":
 		return runVersion(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -109,7 +119,13 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	_, err := config.Load(*path)
+	cfg, err := config.Load(*path)
+	if err == nil {
+		// The schedule grammar (cron + shorthand) lives in internal/scheduler, so
+		// config validation can't reach it (config is a leaf). cmd is the
+		// integration point: check schedules here so `validate` stays the contract.
+		err = checkSchedules(cfg)
+	}
 	if err != nil {
 		if *jsonOut {
 			writeJSON(stdout, map[string]any{
@@ -156,24 +172,15 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	path := fs.String("c", defaultConfigPath, "config file path")
 	level := fs.String("level", "", "run only this level (l1|l2|l3)")
 	jsonOut := fs.Bool("json", false, "machine-readable output")
-	if err := fs.Parse(args); err != nil {
+	name, ok, err := parseNameAndFlags(fs, args)
+	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return 2
 	}
-	rest := fs.Args()
-	if len(rest) == 0 {
+	if !ok {
 		fmt.Fprintln(stderr, "redrill: run requires a drill NAME")
-		return 2
-	}
-	name := rest[0]
-	// flag stops at the first positional, so re-parse what follows NAME — this
-	// lets flags appear on either side (e.g. `run app-db --json`).
-	if err := fs.Parse(rest[1:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
 		return 2
 	}
 
@@ -236,14 +243,52 @@ func findDrill(cfg *config.Config, name string) (*config.Drill, *config.Source, 
 			continue
 		}
 		d := &cfg.Drills[i]
-		for j := range cfg.Sources {
-			if cfg.Sources[j].Name == d.Source {
-				return d, &cfg.Sources[j], true
-			}
+		if src, ok := findSource(cfg, d.Source); ok {
+			return d, src, true
 		}
 		return nil, nil, false
 	}
 	return nil, nil, false
+}
+
+// findSource resolves a source by name.
+func findSource(cfg *config.Config, name string) (*config.Source, bool) {
+	for i := range cfg.Sources {
+		if cfg.Sources[i].Name == name {
+			return &cfg.Sources[i], true
+		}
+	}
+	return nil, false
+}
+
+// parseNameAndFlags parses a subcommand whose flags may sit on either side of a
+// required positional NAME (e.g. `history app-db -n 5` or `history -n 5 app-db`).
+// ok is false when no NAME was given.
+func parseNameAndFlags(fs *flag.FlagSet, args []string) (name string, ok bool, err error) {
+	if err := fs.Parse(args); err != nil {
+		return "", false, err
+	}
+	rest := fs.Args()
+	if len(rest) == 0 {
+		return "", false, nil
+	}
+	// flag.Parse stops at the first positional, so re-parse what follows NAME.
+	if err := fs.Parse(rest[1:]); err != nil {
+		return "", false, err
+	}
+	return rest[0], true, nil
+}
+
+// checkSchedules validates every drill's schedule string against the schedule
+// grammar (cron + human shorthand), returning a joined, path-qualified error.
+func checkSchedules(cfg *config.Config) error {
+	var errs []error
+	for i := range cfg.Drills {
+		if _, err := scheduler.ParseSchedule(cfg.Drills[i].Schedule); err != nil {
+			errs = append(errs, fmt.Errorf("drills[%d].schedule: %w", i, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func printLevel(w io.Writer, out orchestrate.LevelOutcome) {

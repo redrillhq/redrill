@@ -1,4 +1,4 @@
-# Implements docs/agents/LINTING.md — if this file and that doc drift, fix both in the same PR.
+# golangci-lint configuration for redrill.
 version: "2"
 
 linters:

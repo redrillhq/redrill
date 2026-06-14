@@ -1,9 +1,9 @@
--- Migration 0001: initial schema (DESIGN §9.3). Forward-only — never edit a
+-- Migration 0001: initial schema. Forward-only — never edit a
 -- shipped migration; add a new NNNN_*.sql file instead.
 --
 -- All timestamps are INTEGER unix nanoseconds in UTC; max_proof_age is INTEGER
 -- nanoseconds. runs.result is CHECK-constrained to the pass|fail|error taxonomy
--- (DESIGN §9.8) so a bad verdict can never reach the store.
+-- so a bad verdict can never reach the store.
 
 CREATE TABLE sources (
     name        TEXT    NOT NULL PRIMARY KEY,

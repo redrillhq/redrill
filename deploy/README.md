@@ -21,8 +21,8 @@ docker compose exec redrill redrill doctor   # preflight: engines, runtime, scra
 - **Secrets are files.** Mount borg passphrases / read-only SSH keys and reference
   them via `*_file` in the config. There is no inline secret form.
 - **L3 needs the docker socket.** Database sandboxes are spawned on the host
-  runtime via the mounted `/var/run/docker.sock` — the documented trust tradeoff
-  (DESIGN §9.7). Omit the mount for L1/L2-only setups; L3 then reports
+  runtime via the mounted `/var/run/docker.sock` — the documented trust tradeoff.
+  Omit the mount for L1/L2-only setups; L3 then reports
   `skipped (no sandbox runtime)`, never a silent pass. A rootless-podman socket
   works too.
 

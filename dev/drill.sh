@@ -17,7 +17,7 @@
 #             default if the borg fixture exists at $DEV_DATA/borg-fixture
 #   dumpdir:  DUMP_DIR=...   [PATTERN='*.sql.gz']   (pick: newest by mtime)
 #
-# Exit codes (product taxonomy, DESIGN §9.8): 0 asserts pass · 1 a check
+# Exit codes (product taxonomy): 0 asserts pass · 1 a check
 # failed — the backup is bad · 2 couldn't check — infra/spike error.
 #
 # Run inside the dev env: dev/shell.sh dev/drill.sh

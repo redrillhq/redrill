@@ -12,7 +12,7 @@ import (
 	"github.com/alyamovsky/redrill/internal/store"
 )
 
-// The sabotage kit (TESTING.md / DESIGN §13.3): each fixture is a "perfect cron,
+// The sabotage kit: each fixture is a "perfect cron,
 // dead backup" that engines' own checks pass and redrill must flag. Every test
 // asserts the exact verdict (fail — a bad backup, never error) and the catching
 // check. Engine-backed fixtures skip when borg or Docker is absent; the

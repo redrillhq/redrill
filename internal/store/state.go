@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-// RecordProof advances last_proven_at for one (drill, level). The "only on pass"
-// policy lives in the caller; this just records. Per-level: proving L1 never
-// touches L2's proof.
+// RecordProof advances last_proven_at for one (drill, level).
 func (s *Store) RecordProof(ctx context.Context, drill, level string, at time.Time) error {
 	if drill == "" || level == "" {
 		return fmt.Errorf("record proof: drill and level required")

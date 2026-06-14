@@ -125,8 +125,7 @@ type executorBundle struct {
 }
 
 // buildExecutor wires the Docker sandbox when a container engine is reachable,
-// else L3 skips; the janitor reaps containers left by crashed runs. The IO policy
-// (nice/ionice/bandwidth) is applied to every spawned engine.
+// else L3 skips.
 func buildExecutor(ctx context.Context, cfg *config.Config, log *slog.Logger) executorBundle {
 	host, _ := os.Hostname()
 	local := exec.NewLocal(host).WithIOPolicy(ioPolicy(cfg))

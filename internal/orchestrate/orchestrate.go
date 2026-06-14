@@ -15,7 +15,7 @@ import (
 const statusSkipped = "skipped"
 
 // Orchestrator drives one run state machine per drill and owns all
-// run/step/evidence writing. Engine/check work goes through the Executor seam.
+// run/step/evidence writing.
 type Orchestrator struct {
 	store *store.Store
 	exec  exec.Executor

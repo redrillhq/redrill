@@ -20,8 +20,7 @@ type migration struct {
 	sql     string
 }
 
-// migrate applies pending migrations, each in its own transaction. Forward-only:
-// applied migrations are never re-run, shipped files never edited.
+// migrate applies pending migrations, each in its own transaction.
 func migrate(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version INTEGER NOT NULL PRIMARY KEY,
@@ -68,8 +67,7 @@ func applyMigration(ctx context.Context, db *sql.DB, m migration) error {
 	return nil
 }
 
-// loadMigrations returns the embedded migrations ordered by version; a gap or
-// duplicate in the 1.. numbering is a build-time error.
+// loadMigrations returns the embedded migrations ordered by version.
 func loadMigrations() ([]migration, error) {
 	entries, err := fs.ReadDir(migrationsFS, "migrations")
 	if err != nil {

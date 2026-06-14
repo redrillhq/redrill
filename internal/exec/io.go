@@ -14,7 +14,6 @@ type IOPolicy struct {
 	BandwidthKiB int64  // KiB/s; 0 = unset
 }
 
-// wraps reports whether nice/ionice would prefix the command.
 func (p IOPolicy) wraps() bool { return p.NiceCPU != 0 || ioClassNum(p.IOClass) >= 0 }
 
 // decorate prefixes name+args with nice/ionice so the spawned engine inherits

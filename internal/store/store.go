@@ -9,14 +9,12 @@ import (
 	_ "modernc.org/sqlite" // registers the cgo-free "sqlite" driver
 )
 
-// Timestamps are persisted as UTC unix nanoseconds. Store is clock-free: every
-// business timestamp is caller-supplied.
+// Store is clock-free: every business timestamp is caller-supplied.
 type Store struct {
 	db *sql.DB
 }
 
-// Open creates the database if absent and applies pending migrations. The
-// caller must Close it.
+// Open creates the database if absent and applies pending migrations.
 func Open(ctx context.Context, path string) (*Store, error) {
 	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {

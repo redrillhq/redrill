@@ -1,3 +1,2 @@
-// Package store is the embedded SQLite state: the only package that may import a
-// SQL driver.
+// Package store is the embedded SQLite state.
 package store

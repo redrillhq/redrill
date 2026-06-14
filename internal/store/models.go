@@ -28,7 +28,6 @@ const (
 )
 
 // Result is a finished run's verdict; a still-running run has the empty Result.
-// fail (backup is bad) and error (couldn't check) are deliberately distinct.
 type Result string
 
 const (

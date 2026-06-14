@@ -24,8 +24,7 @@ const (
 	artifactByRun = `SELECT run_id, idx, name, path, bytes FROM artifacts WHERE run_id = ? ORDER BY idx`
 )
 
-// CreateRun inserts an unfinished run. Drill, Trigger, and StartedAt are
-// required.
+// CreateRun inserts an unfinished run.
 func (s *Store) CreateRun(ctx context.Context, r Run) (int64, error) {
 	switch {
 	case r.Drill == "":
@@ -50,8 +49,8 @@ func (s *Store) CreateRun(ctx context.Context, r Run) (int64, error) {
 	return id, nil
 }
 
-// FinishRun records a run's outcome by r.ID; identity fields set by CreateRun
-// are left untouched. Returns wrapped ErrNotFound for an unknown id.
+// FinishRun records a run's outcome by r.ID; returns wrapped ErrNotFound for an
+// unknown id.
 func (s *Store) FinishRun(ctx context.Context, r Run) error {
 	if r.ID == 0 {
 		return fmt.Errorf("finish run: id required")
@@ -152,8 +151,8 @@ func nullResult(r Result) sql.NullString {
 	return sql.NullString{String: string(r), Valid: true}
 }
 
-// AddStep appends a step to a run; Idx is assigned in insertion order. A run is
-// single-flight, so the MAX(idx)+1 read needs no extra locking.
+// AddStep appends a step to a run. A run is single-flight, so the MAX(idx)+1 read
+// needs no extra locking.
 func (s *Store) AddStep(ctx context.Context, st RunStep) error {
 	if st.StartedAt.IsZero() {
 		return fmt.Errorf("add step to run %d: started_at required", st.RunID)

@@ -34,7 +34,7 @@ jobs:
           cache: false # nothing to cache until go.sum exists
       - run: make test
 
-  # Wired per MILESTONES M1; trivially green until integration tests land (M5+).
+  # Real-engine drills in containers (build tag: integration). Needs Docker; borg tests skip if borg is absent.
   integration:
     runs-on: ubuntu-latest
     steps:
@@ -45,7 +45,7 @@ jobs:
           cache: false # nothing to cache until go.sum exists
       - run: make test-integration
 
-  # Wired per MILESTONES M1; trivially green until the sabotage kit lands (M5+).
+  # The sabotage kit (build tag: sabotage): every fixture must be flagged. Engine fixtures need Docker + borg.
   sabotage:
     runs-on: ubuntu-latest
     steps:

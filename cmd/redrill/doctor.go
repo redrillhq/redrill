@@ -93,7 +93,7 @@ func engineChecks(ctx context.Context, cfg *config.Config) []doctorCheck {
 	}
 	if hasRestic {
 		out = append(out, doctorCheck{Name: "engine: restic", Status: statusWarn,
-			Detail: "restic driver not implemented yet (M12); restic drills will error"})
+			Detail: "restic driver not implemented yet; restic drills will error"})
 	}
 	return out
 }
@@ -175,7 +175,7 @@ func repoCheck(ctx context.Context, src config.Source) doctorCheck {
 	case err == nil:
 		return doctorCheck{Name: name, Status: statusOK, Detail: "reachable (" + src.Type + ")"}
 	case errors.Is(err, exec.ErrUnsupported):
-		return doctorCheck{Name: name, Status: statusWarn, Detail: "restic driver not implemented yet (M12)"}
+		return doctorCheck{Name: name, Status: statusWarn, Detail: "restic driver not implemented yet"}
 	default:
 		return doctorCheck{Name: name, Status: statusErr, Detail: firstLine(err.Error())}
 	}

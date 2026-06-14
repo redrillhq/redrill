@@ -29,7 +29,7 @@ drills:
       l2:
         restore: { scope: sample, sample: { files: 200, newest: 50 } }
         checks:
-          - path_exists: "config/config.php"   # verify exact path at the M11 dogfood gate
+          - path_exists: "config/config.php"   # verify the exact path against the real repo
           - hash_match: true
           - newest_file_max_age: 8d
   - name: nextcloud-db
@@ -38,7 +38,7 @@ drills:
     max_proof_age: 10d
     levels:
       l3:
-        extract_path: "nextcloud-aio-database.dump"   # verify at the M11 dogfood gate
+        extract_path: "nextcloud-aio-database.dump"   # verify against the real repo
         sandbox: { image: postgres:16, network: none, memory: 1GiB, timeout: 20m }
         load: auto
         checks:

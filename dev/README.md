@@ -1,17 +1,16 @@
 # `dev/` — redrill dev environment
 
 Reproducible, containerized toolset for **real-engine e2e during development**: build
-deterministic backup fixtures (borg repo, dumpdir) and run the drill loop redrill will
-productize — restore → postgres sandbox → SQL asserts — by hand, with timings and a report.
+deterministic backup fixtures (borg repo, dumpdir) and run the same drill loop redrill
+automates (restore → postgres sandbox → SQL asserts) by hand, with timings and a report.
 
-Born as the M0 spike ([docs/agents/MILESTONES.md](../docs/agents/MILESTONES.md)); kept as a permanent dev
-tool. It complements, never replaces, the product test layers: Go unit/integration tests and
-the sabotage CI kit ([docs/agents/TESTING.md](../docs/agents/TESTING.md)) arrive with M5+ and remain the
-merge gates.
+This is for hands-on e2e runs during development, not part of CI. The automated gates are the
+Go tests (`make test`, `make test-integration`) and the sabotage kit (`make test-sabotage`);
+use this when you want to drive the real engines by hand and read a drill report.
 
 **The only host dependency is Docker.** Every engine dep (borg, postgres client tools, zstd,
-ssh) lives in the `redrill-dev` image — nothing gets installed on your machine. This mirrors
-the product's own deployment philosophy (DESIGN §10: the official image bundles the engines).
+ssh) lives in the `redrill-dev` image — nothing gets installed on your machine. The shipped
+redrill image bundles its engines the same way.
 
 ## Quickstart
 
@@ -85,8 +84,8 @@ the repo, never on your host filesystem.
 - Read them via `dev/shell.sh cat /work/scratch/out/results.md` or an interactive shell
 
 Cleanup: `docker volume rm redrill-dev-data` (data), `docker rmi redrill-dev` (image; it
-rebuilds on next use). Exit codes from `drill.sh` follow the product taxonomy (DESIGN §9.8):
-`0` pass · `1` check failed — backup is bad · `2` couldn't check — infra.
+rebuilds on next use). Exit codes from `drill.sh` match the product: `0` pass · `1` check
+failed (the backup is bad) · `2` couldn't check (infra).
 
 ## Safety properties
 
@@ -96,11 +95,11 @@ rebuilds on next use). Exit codes from `drill.sh` follow the product taxonomy (D
 - The sandbox runs with `network=none`, is labeled `io.redrill.dev=1`, and is removed on exit.
 - The fixture passphrase is a fixture-only secret (deterministic, guards synthetic data).
 
-## Using it against a real repo (the M11 dogfood gate)
+## Using it against a real repo
 
-The same `drill.sh` performs the deferred Nextcloud AIO verification — run it against the real
-repo (read-only key, outside the AIO backup window), let path discovery find `config.php` and
-the DB dump, and override the asserts per DESIGN Appendix A:
+The same `drill.sh` works against a real Nextcloud AIO repo: run it with a read-only key,
+outside the AIO backup window, let path discovery find `config.php` and the DB dump, and
+override the asserts for your own data:
 
 ```sh
 BORG_REPO="ssh://backup@nas.lan/./borg/nextcloud-aio" \
@@ -112,8 +111,8 @@ dev/shell.sh dev/drill.sh
 
 (SSH key/known_hosts need mounting into the dev env at that point — extend `shell.sh` then,
 not before.) Results from real data may contain personal information: they stay in the data
-volume; don't commit or share them. Record the verified paths into docs/agents/DESIGN.md Appendix A + §12
-as the M11 gate prescribes.
+volume; don't commit or share them. Note the verified in-archive paths so you can pin them in
+your real config.
 
 ## Troubleshooting
 

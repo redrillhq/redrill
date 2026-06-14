@@ -372,7 +372,7 @@ TOTAL_DUR=$(( $(date +%s) - SCRIPT_T0 ))
   fi
   echo
   if [[ "$MODE" == borg ]]; then
-    echo "## In-archive paths (the M11-gate payload when run against the real AIO repo)"
+    echo "## In-archive paths (the payload when run against the real AIO repo)"
     echo
     echo "| What | Path | Status |"
     echo "|---|---|---|"
@@ -413,10 +413,9 @@ TOTAL_DUR=$(( $(date +%s) - SCRIPT_T0 ))
   echo
   echo "## Follow-ups"
   echo
-  echo "- Record timings/anomalies relevant to the current milestone."
-  echo "- If this ran against the real Nextcloud AIO repo (M11 dogfood gate): update the"
-  echo "  docs/agents/DESIGN.md Appendix A placeholders (config.php path, dump \`extract_path\`) and the"
-  echo "  §12 recipe caveat with the verified paths above."
+  echo "- Record any timings or anomalies worth noting."
+  echo "- If this ran against the real Nextcloud AIO repo: pin the verified paths above"
+  echo "  (config.php path, dump \`extract_path\`) in your real redrill config."
 } > "$REPORT"
 
 echo

@@ -2,7 +2,7 @@
 
 **Your backups run every night. Have you ever actually restored one?**
 
-Redrill is a self-hosted daemon that proves your backups are restorable by actually restoring them. On a schedule it pulls data out of the backups you already make (Borg and Postgres are supported for now), restores them into a throwaway sandbox, and for databases boots a real instance to check the loaded data. For each dataset you get a line like:
+Redrill is a self-hosted daemon that proves your backups are restorable by actually restoring them. On a schedule it pulls data out of the backups you already make (Borg repos and Postgres dumps, for now), restores them into a throwaway sandbox, and for databases boots a real instance to check the loaded data. For each dataset you get a line like:
 
 > **last proven restore: 3 days ago** ✅
 
@@ -30,8 +30,8 @@ Redrill is read-only and never modifies your backups. Each drill is configurable
 | Layer | What it does | IO |
 |------:|--------------|----|
 | **L1 — Integrity** | **Borg:** native `borg check`, snapshot freshness, size-anomaly detection.<br>**pg_dump:** minimum file size, `gzip -t`/`zstd -t` compression test, file freshness (mtime). | Low |
-| **L2 — Restorability** | **Borg:** restores a sample of files into scratch, asserts `path_exists`, newest-file freshness, file-count tolerance vs. the last good run.<br>**pg_dump:** tbd | Moderate (scales with sample size) |
-| **L3 — Usability** | **Borg:** tbd<br>**pg_dump:** boots an ephemeral, network-isolated Postgres, loads the dump, runs your `sql` assertions (`select count(*) from users` → `> 0`, `age < 8d`, …). | High (full restore + DB boot) |
+| **L2 — Restorability** | **Borg:** restores a sample of files into scratch, asserts `path_exists`, newest-file freshness, file-count tolerance vs. the last good run.<br>**pg_dump:** copies the dump into scratch, but for a single dump L1+L3 do the real work. | Moderate (scales with sample size) |
+| **L3 — Usability** | **Borg:** extracts the dump at `extract_path` from the archive, then boots it the same way.<br>**pg_dump:** boots an ephemeral, network-isolated Postgres, loads the dump, runs your `sql` assertions (`select count(*) from users` → `> 0`, `age < 8d`, …). | High (full restore + DB boot) |
 
 Layers always run sequentially, so if L3 is selected in the config, a failing L2 stops the job from executing.
 
@@ -131,7 +131,7 @@ drills:
 redrill validate          # strictly check your config (exit 3 on any problem)
 redrill doctor            # preflight: engines, container runtime, scratch space, repo reachability
 redrill run NAME          # run one drill now and stream the step log  (--level l1|l2|l3)
-redrill status            # table: each drill's last run, proof age per level, next run, SLA state
+redrill status            # table: each drill's last run, proof age, next run, SLA state
 redrill history NAME      # past runs with verdicts and durations      (-n 20)
 redrill serve             # the daemon: scheduler + notifications
 redrill version
@@ -152,7 +152,7 @@ nextcloud-files   fail 1d ago   6d ago     Sun 04:10    STALE
 
 - **Sources** — where backups live and how to read them. Today: `borg` and `dumpdir` (a directory of dump files).
 - **Drills** — a scheduled audit of one source: `schedule`, `max_proof_age` (the proof SLA), optional `jitter`/`timeout`/`retention`, and one or more `levels`.
-- **Checks** — typed assertions producing evidence (expected vs. actual): `path_exists`, `file_count_tolerance_pct`, `newest_file_max_age`, `sql`, `sql_no_error`. The `sql` `expect` grammar covers `> N`, `>= N`, `== N`, `between A B`, `age < 8d`, `matches REGEX`, `nonempty`.
+- **Checks** — typed assertions producing evidence (expected vs. actual): `path_exists`, `file_count_tolerance_pct`, `newest_file_max_age`, `sql`, `sql_no_error`. The `sql` `expect` grammar covers `> N`, `>= N`, `== N`, `!= N`, `between A B`, `age < 8d` / `age > 8d`, `matches REGEX`, `nonempty`.
 - **Notifications** — via [shoutrrr](https://github.com/nicholas-fedor/shoutrrr): ntfy, Telegram, Discord, email, webhooks, and more. Messages lead with the diagnosis and the last-good date, not a stack trace.
 - **Retention** — prune each drill's run history by `max_age` and/or `max_count`. The proof timeline (`last_proven_at`) is kept forever.
 
@@ -167,8 +167,8 @@ The full annotated schema lives in [`deploy/compose/config.example.yaml`](deploy
 
 ## Trusting the verifier
 
-A verifier you can't trust is worse than none. On every change, the code runs through a set of tests in a real sandbox; the tests themselves live in the `dev` folder. Some of those are deliberately broken backups that are byte-perfect but semantically dead (an empty-but-valid gzip, a dump of the wrong database, a stale snapshot), and the build fails unless Redrill flags each one.
+A verifier you can't trust is worse than none. On every change the test suite runs, including real-engine drills in throwaway containers. Some of those tests feed Redrill deliberately broken backups that are byte-perfect but semantically dead (for example, an empty-but-valid gzip, a dump of the wrong database, or a stale snapshot), and the build fails unless it flags each one.
 
 ## Feedback
 
-Redrill is early and under active development. Bug reports and ideas are welcome through issues, especially which backup tools you'd want supported next.
+Redrill is under active development. Bug reports and ideas are welcome through issues, especially which backup tools you'd want supported next.

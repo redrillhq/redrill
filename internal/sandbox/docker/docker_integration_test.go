@@ -39,7 +39,7 @@ func TestIntegrationSandboxLifecycle(t *testing.T) {
 		Network:  "none",
 		Memory:   1 << 30,
 		Labels:   map[string]string{sandbox.RunLabel: "test-lifecycle"},
-		ReadyCmd: []string{"pg_isready", "-U", "postgres"},
+		ReadyCmd: []string{"pg_isready", "-h", "127.0.0.1", "-U", "postgres"},
 		Files:    []sandbox.FileInject{{HostPath: dump, ContainerPath: "/tmp/probe.sql"}},
 	})
 	if err != nil {
@@ -112,7 +112,7 @@ func TestIntegrationReadyFailsFastOnExit(t *testing.T) {
 		Image:    "postgres:16", // no POSTGRES_PASSWORD: entrypoint exits non-zero
 		Network:  "none",
 		Labels:   map[string]string{sandbox.RunLabel: "fail-fast"},
-		ReadyCmd: []string{"pg_isready", "-U", "postgres"},
+		ReadyCmd: []string{"pg_isready", "-h", "127.0.0.1", "-U", "postgres"},
 	})
 	if sb != nil {
 		_ = sb.Close(ctx)

@@ -152,12 +152,14 @@ func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scr
 func l3Spec(step StepSpec, loadedPath string) sandbox.SandboxSpec {
 	l3 := step.L3
 	return sandbox.SandboxSpec{
-		Image:    l3.Sandbox.Image,
-		Env:      sandboxEnv(l3.Sandbox.Env),
-		Network:  "none",
-		Memory:   l3.Sandbox.Memory.Bytes(),
-		Labels:   map[string]string{sandbox.RunLabel: strconv.FormatInt(step.RunID, 10)},
-		ReadyCmd: []string{"pg_isready", "-U", "postgres"},
+		Image:   l3.Sandbox.Image,
+		Env:     sandboxEnv(l3.Sandbox.Env),
+		Network: "none",
+		Memory:  l3.Sandbox.Memory.Bytes(),
+		Labels:  map[string]string{sandbox.RunLabel: strconv.FormatInt(step.RunID, 10)},
+		// Probe over TCP: postgres's init-phase temp server is socket-only, so a
+		// socket probe passes before the real server is up, racing the load.
+		ReadyCmd: []string{"pg_isready", "-h", "127.0.0.1", "-U", "postgres"},
 		Files:    []sandbox.FileInject{{HostPath: loadedPath, ContainerPath: containerDumpPath}},
 	}
 }

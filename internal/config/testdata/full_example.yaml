@@ -65,6 +65,9 @@ drills:
     source: app-dumps
     schedule: "Sun 05:00"
     max_proof_age: 10d
+    retention:                       # prune this drill's run history; drill_state kept forever
+      max_age: 90d                   # drop runs older than this
+      max_count: 50                  # and keep at most this many
     levels:
       l1:
         file_min_bytes: 1MiB

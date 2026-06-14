@@ -102,6 +102,20 @@ func TestParseValidBase(t *testing.T) {
 	}
 }
 
+func TestRetentionParses(t *testing.T) {
+	t.Parallel()
+	c, err := Parse([]byte("version: 1\ndata_dir: /v\nscratch: {dir: /s}\n" +
+		"sources: [{name: s, type: borg, repo: r}]\n" +
+		"drills: [{name: d, source: s, schedule: x, retention: {max_age: 90d, max_count: 50}, levels: {l1: {native_check: true}}}]\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	r := c.Drills[0].Retention
+	if r.MaxAge.Duration() != 90*24*time.Hour || r.MaxCount != 50 {
+		t.Errorf("retention = %+v, want 90d/50", r)
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -148,6 +162,9 @@ func TestParseErrors(t *testing.T) {
 		{"drill source unknown", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: nope, schedule: x, levels: {l1: {native_check: true}}}]\n", "no such source"},
 		{"drill no levels", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {}}]\n", "at least one level"},
 		{"drill schedule missing", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, levels: {l1: {native_check: true}}}]\n", "schedule"},
+		{"retention negative count", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, retention: {max_count: -1}, levels: {l1: {native_check: true}}}]\n", "retention.max_count"},
+		{"retention negative age", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, retention: {max_age: -5h}, levels: {l1: {native_check: true}}}]\n", "negative duration"},
+		{"retention unknown key", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, retention: {nope: 1}, levels: {l1: {native_check: true}}}]\n", "nope"},
 		{"l1 dumpdir field on borg", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l1: {file_min_bytes: 1MiB}}}]\n", "levels.l1.file_min_bytes"},
 		{"l1 borg field on dumpdir", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: dumpdir, path: /p, pattern: \"*.gz\"}]\ndrills: [{name: d, source: s, schedule: x, levels: {l1: {snapshot_max_age: 36h}}}]\n", "levels.l1.snapshot_max_age"},
 		{"l1 size anomaly range", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l1: {size_anomaly_pct: 150}}}]\n", "0..100"},

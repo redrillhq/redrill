@@ -8,11 +8,17 @@ import (
 	"time"
 
 	"github.com/alyamovsky/redrill/internal/checks"
+	"github.com/alyamovsky/redrill/internal/config"
 	"github.com/alyamovsky/redrill/internal/store"
 )
 
-// Sabotage kit: each fixture is a "perfect cron, dead backup" redrill must flag.
-// Built here, not committed, because they depend on mtime, which git drops.
+// The sabotage kit (TESTING.md / DESIGN §13.3): each fixture is a "perfect cron,
+// dead backup" that engines' own checks pass and redrill must flag. Every test
+// asserts the exact verdict (fail — a bad backup, never error) and the catching
+// check. Engine-backed fixtures skip when borg or Docker is absent; the
+// maintainer's CI provides both, so the gate blocks there.
+//
+// mtime-dependent fixtures are built here, not committed, because git drops mtime.
 
 func writeRaw(t *testing.T, path, content string, mtime time.Time) {
 	t.Helper()
@@ -21,6 +27,16 @@ func writeRaw(t *testing.T, path, content string, mtime time.Time) {
 	}
 	if err := os.Chtimes(path, mtime, mtime); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// mustFail asserts the run flagged a bad backup (fail), keeping fail distinct
+// from error (the auditor's own problem).
+func mustFail(t *testing.T, res RunResult, fixture string) {
+	t.Helper()
+	if res.Status != store.ResultFail {
+		t.Fatalf("%s: result = %s, want fail (a bad backup, not an auditor error); levels = %+v",
+			fixture, res.Status, res.Levels)
 	}
 }
 
@@ -41,24 +57,21 @@ func assertCaught(t *testing.T, res RunResult, byKinds ...string) {
 	t.Errorf("no failing check among %v caught the sabotage; levels = %+v", byKinds, res.Levels)
 }
 
-// empty-dump: 0-byte file with a plausible name and fresh mtime;
-// file_min_bytes and compression_test must catch it.
+// empty-dump: a 0-byte file with a plausible name and fresh mtime (dumpdir L1).
 func TestSabotageEmptyDump(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	writeRaw(t, dir+"/app-1.sql.gz", "", base) // 0-byte "dump", fresh
+	writeRaw(t, dir+"/app-1.sql.gz", "", base)
 	st := newStore(t)
 	drill, src := drillFor(dir, l1Full())
 
 	res := runDrill(t, st, drill, src, RunOptions{})
-	if res.Status != store.ResultFail {
-		t.Fatalf("empty-dump: result = %s, want fail", res.Status)
-	}
+	mustFail(t, res, "empty-dump")
 	assertCaught(t, res, "file_min_bytes", "compression_test")
 }
 
-// stale-source: a valid dump but 30 days old; only max_age should flag it.
-func TestSabotageStaleSource(t *testing.T) {
+// stale-source (dumpdir L1 max_age): a valid dump 30 days old.
+func TestSabotageStaleSourceDumpdir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	makeGz(t, dir, "app-1.sql.gz", "SELECT 1; -- a perfectly valid dump", base.Add(-30*24*time.Hour))
@@ -66,8 +79,66 @@ func TestSabotageStaleSource(t *testing.T) {
 	drill, src := drillFor(dir, l1Full())
 
 	res := runDrill(t, st, drill, src, RunOptions{})
-	if res.Status != store.ResultFail {
-		t.Fatalf("stale-source: result = %s, want fail", res.Status)
-	}
+	mustFail(t, res, "stale-source (dumpdir)")
 	assertCaught(t, res, "max_age")
+}
+
+// stale-source (borg L1 snapshot_max_age): newest archive 30 days old.
+func TestSabotageStaleSourceBorg(t *testing.T) {
+	requireBorg(t)
+	repo, passFile := buildBorgRepo(t, false, 30*24*time.Hour)
+	res := runBorgDrill(t, repo, passFile, borgStaleDrill())
+	mustFail(t, res, "stale-source (borg)")
+	assertCaught(t, res, "snapshot_max_age")
+}
+
+// truncated-segment (borg L1 native check): the one corruption engines catch —
+// proves redrill delegates integrity to borg check correctly.
+func TestSabotageTruncatedSegment(t *testing.T) {
+	requireBorg(t)
+	repo, passFile := buildBorgRepo(t, false, 0)
+
+	seg := largestFile(t, repo+"/data")
+	info, err := os.Stat(seg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(seg, info.Size()-64); err != nil {
+		t.Fatal(err)
+	}
+
+	res := runBorgDrill(t, repo, passFile, borgNativeOnlyDrill())
+	mustFail(t, res, "truncated-segment")
+	assertCaught(t, res, "native_check")
+}
+
+// missing-data-dir (borg L2 path_exists): a bad exclude dropped data/.
+func TestSabotageMissingDataDir(t *testing.T) {
+	requireBorg(t)
+	repo, passFile := buildBorgRepo(t, true, 0)
+	res := runBorgDrill(t, repo, passFile, borgL1L2Drill())
+	mustFail(t, res, "missing-data-dir")
+	assertCaught(t, res, "path_exists")
+}
+
+// wrong-db-dump (dumpdir L3 sql): a valid dump of the wrong/empty database.
+func TestSabotageWrongDBDump(t *testing.T) {
+	rt := requireDocker(t)
+	dir := sqlDumpdir(t, "CREATE TABLE users(id int);\n") // table exists, but no rows
+	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
+		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
+	})
+	mustFail(t, res, "wrong-db-dump")
+	assertCaught(t, res, "sql")
+}
+
+// version-trap (dumpdir L3 load): a dump needing a newer pg major than the sandbox.
+func TestSabotageVersionTrap(t *testing.T) {
+	rt := requireDocker(t)
+	dir := sqlDumpdir(t, "-- Dumped from database version 99.0\nCREATE TABLE users(id int);\nINSERT INTO users VALUES (1);\n")
+	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
+		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
+	})
+	mustFail(t, res, "version-trap")
+	assertCaught(t, res, "load")
 }

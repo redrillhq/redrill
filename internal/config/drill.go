@@ -1,13 +1,21 @@
 package config
 
 type Drill struct {
-	Name        string   `yaml:"name"`
-	Source      string   `yaml:"source"`
-	Schedule    string   `yaml:"schedule"`
-	Jitter      Duration `yaml:"jitter"`
-	MaxProofAge Duration `yaml:"max_proof_age"`
-	Timeout     Duration `yaml:"timeout"`
-	Levels      Levels   `yaml:"levels"`
+	Name        string    `yaml:"name"`
+	Source      string    `yaml:"source"`
+	Schedule    string    `yaml:"schedule"`
+	Jitter      Duration  `yaml:"jitter"`
+	MaxProofAge Duration  `yaml:"max_proof_age"`
+	Timeout     Duration  `yaml:"timeout"`
+	Levels      Levels    `yaml:"levels"`
+	Retention   Retention `yaml:"retention"`
+}
+
+// Retention prunes a drill's run history by age and/or count; an unset (zero)
+// bound is disabled, and unset retention keeps every run.
+type Retention struct {
+	MaxAge   Duration `yaml:"max_age"`
+	MaxCount int      `yaml:"max_count"`
 }
 
 // At least one level must be configured.
@@ -69,6 +77,9 @@ func (d *Drill) validate(path, srcType string, es *errset) {
 	}
 	if d.Levels.L1 == nil && d.Levels.L2 == nil && d.Levels.L3 == nil {
 		es.add(path+".levels", "at least one level (l1/l2/l3) required")
+	}
+	if d.Retention.MaxCount < 0 {
+		es.add(path+".retention.max_count", "must be >= 0, got %d", d.Retention.MaxCount)
 	}
 	if d.Levels.L1 != nil {
 		d.Levels.L1.validate(path+".levels.l1", srcType, es)

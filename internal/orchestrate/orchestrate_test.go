@@ -203,6 +203,54 @@ func TestRunNoSandboxRuntimeSkipsL3(t *testing.T) {
 	}
 }
 
+// cancelingExec cancels the run's context right after the first step produces its
+// result, forcing the orchestrator's subsequent evidence write to fail mid-run.
+type cancelingExec struct {
+	inner  exec.Executor
+	cancel context.CancelFunc
+	fired  bool
+}
+
+func (c *cancelingExec) Describe() exec.ExecutorInfo { return c.inner.Describe() }
+
+func (c *cancelingExec) RunStep(ctx context.Context, step exec.StepSpec) (exec.StepResult, error) {
+	res, err := c.inner.RunStep(ctx, step)
+	if !c.fired {
+		c.fired = true
+		c.cancel()
+	}
+	return res, err
+}
+
+// A store error mid-run (here, a canceled context) must still finalize the run as
+// error — never leave a zombie with a NULL result.
+func TestRunFinalizesOnMidRunError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-1*time.Hour))
+	st := newStore(t)
+	drill, src := drillFor(dir, l1Full())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ex := &cancelingExec{inner: exec.NewLocal("h"), cancel: cancel}
+	o := New(st, ex, func() time.Time { return base })
+
+	if _, err := o.Run(ctx, drill, src, RunOptions{}); err == nil {
+		t.Fatal("want an error from the canceled mid-run write")
+	}
+
+	runs, err := st.ListRuns(context.Background(), drill.Name, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want 1", len(runs))
+	}
+	if runs[0].Result != store.ResultError || runs[0].FinishedAt.IsZero() {
+		t.Errorf("run = %s finished=%v, want error/finished (no zombie)", runs[0].Result, !runs[0].FinishedAt.IsZero())
+	}
+}
+
 func TestRunLevelFilterUnknownLevel(t *testing.T) {
 	t.Parallel()
 	st := newStore(t)

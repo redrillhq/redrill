@@ -20,6 +20,9 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %s: %w", path, err)
 	}
+	// One connection serializes all access against the single file, so concurrent
+	// writers (scheduler runs + the staleness sweeper) never hit SQLITE_BUSY.
+	db.SetMaxOpenConns(1)
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open sqlite %s: %w", path, err)

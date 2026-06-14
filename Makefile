@@ -22,9 +22,12 @@ test:
 test-integration:
 	go test -race -tags integration -p 1 ./...
 
-# The sabotage gate (TESTING.md): every fixture must be flagged. Trivially green until fixtures land.
+# The sabotage gate (TESTING.md): every fixture must be flagged. Borg/Docker
+# fixtures skip when the engine is absent and block in CI where both are present.
+# -p 1 serializes packages: the L3 fixtures share the janitor, which reaps every
+# redrill container, so two packages' container tests must not run at once.
 test-sabotage:
-	go test -tags sabotage ./...
+	go test -tags sabotage -p 1 ./...
 
 lint:
 	$(GOLANGCI_LINT) run

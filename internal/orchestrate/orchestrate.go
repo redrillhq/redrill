@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"time"
 
 	"github.com/alyamovsky/redrill/internal/checks"
@@ -21,11 +23,23 @@ type Orchestrator struct {
 	exec  exec.Executor
 	now   func() time.Time
 	host  string
+	log   *slog.Logger
 }
 
 // now is the injected clock (UTC).
 func New(st *store.Store, ex exec.Executor, now func() time.Time) *Orchestrator {
-	return &Orchestrator{store: st, exec: ex, now: now, host: ex.Describe().Host}
+	return &Orchestrator{
+		store: st, exec: ex, now: now, host: ex.Describe().Host,
+		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+}
+
+// WithLogger sets the logger used for non-fatal housekeeping (e.g. retention).
+func (o *Orchestrator) WithLogger(l *slog.Logger) *Orchestrator {
+	if l != nil {
+		o.log = l
+	}
+	return o
 }
 
 type RunOptions struct {
@@ -75,6 +89,24 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	}
 	result := RunResult{RunID: runID}
 
+	var bytesRestored int64
+	var filesRestored int
+	// Finalize even on the error path so a mid-run store failure or a canceled
+	// ctx never leaves a zombie run (result NULL). WithoutCancel lets cleanup
+	// persist after a timeout cancellation.
+	finished := false
+	defer func() {
+		if finished {
+			return
+		}
+		end := o.now().UTC()
+		_ = o.store.FinishRun(context.WithoutCancel(ctx), store.Run{
+			ID: runID, Result: store.ResultError, LevelReached: result.LevelReached,
+			BytesRestored: bytesRestored, FilesRestored: int64(filesRestored),
+			DurationMS: end.Sub(start).Milliseconds(), FinishedAt: end,
+		})
+	}()
+
 	// file_count_tolerance baseline, read orchestrator-side since checks never touch the store.
 	prevFileCount := 0
 	if last, ok, err := o.store.LastRunWithResult(ctx, drill.Name, store.ResultPass); err == nil && ok {
@@ -82,8 +114,6 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	}
 
 	shortCircuit := false
-	var bytesRestored int64
-	var filesRestored int
 	for _, lv := range levels {
 		outcome, ran, err := o.runLevel(ctx, runID, drill, src, lv, start, shortCircuit, opts.Scratch, prevFileCount, &bytesRestored, &filesRestored)
 		if err != nil {
@@ -112,31 +142,53 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 		DurationMS:    end.Sub(start).Milliseconds(),
 		FinishedAt:    end,
 	}
-	if err := o.store.FinishRun(ctx, fin); err != nil {
+	// WithoutCancel so a run whose work completed keeps its real verdict even if
+	// ctx expired at the wire; the defer above is only the abnormal-path backstop.
+	if err := o.store.FinishRun(context.WithoutCancel(ctx), fin); err != nil {
 		return RunResult{}, fmt.Errorf("finish run %d: %w", runID, err)
 	}
+	finished = true
+	o.pruneRetention(ctx, drill, end)
 	return result, nil
+}
+
+// pruneRetention enforces the drill's age+count retention; failures are
+// non-fatal housekeeping and never change a run's verdict.
+func (o *Orchestrator) pruneRetention(ctx context.Context, drill config.Drill, now time.Time) {
+	maxAge := drill.Retention.MaxAge.Duration()
+	maxCount := drill.Retention.MaxCount
+	if maxAge <= 0 && maxCount <= 0 {
+		return
+	}
+	if n, err := o.store.Prune(context.WithoutCancel(ctx), drill.Name, maxAge, maxCount, now); err != nil {
+		o.log.Warn("retention prune failed", "drill", drill.Name, "error", err.Error())
+	} else if n > 0 {
+		o.log.Info("pruned old runs", "drill", drill.Name, "count", n)
+	}
 }
 
 // ran reports whether the level actually executed (vs. skipped).
 func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.Drill, src config.Source, lv leveled, start time.Time, shortCircuit bool, scratch config.Scratch, prevFileCount int, bytes *int64, files *int) (LevelOutcome, bool, error) {
+	// start is the run's logical clock (check evaluation, proof time); stepStart
+	// is this level's own start so per-level durations are real.
+	stepStart := o.now().UTC()
 	if shortCircuit {
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (a lower level did not pass)"}
-		return out, false, o.recordStep(ctx, runID, out, start)
+		return out, false, o.recordStep(ctx, runID, out, stepStart)
 	}
 
 	res, err := o.exec.RunStep(ctx, o.buildStep(runID, drill, src, lv, start, scratch, prevFileCount))
 	switch {
 	case errors.Is(err, exec.ErrUnsupported):
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (level not implemented yet)"}
-		return out, false, o.recordStep(ctx, runID, out, start)
+		return out, false, o.recordStep(ctx, runID, out, stepStart)
 	case errors.Is(err, exec.ErrNoSandboxRuntime):
 		// Degrades to skipped, never a silent pass.
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (no sandbox runtime)"}
-		return out, false, o.recordStep(ctx, runID, out, start)
+		return out, false, o.recordStep(ctx, runID, out, stepStart)
 	case err != nil:
 		out := LevelOutcome{Level: lv.name, Status: string(checks.Error), Summary: "executor: " + err.Error()}
-		return out, true, o.recordStep(ctx, runID, out, start)
+		return out, true, o.recordStep(ctx, runID, out, stepStart)
 	}
 
 	out := LevelOutcome{Level: lv.name, Status: string(res.Status), Summary: res.Summary, Evidence: res.Evidence}
@@ -149,7 +201,7 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 			return out, true, fmt.Errorf("write evidence for run %d: %w", runID, err)
 		}
 	}
-	if err := o.recordStep(ctx, runID, out, start); err != nil {
+	if err := o.recordStep(ctx, runID, out, stepStart); err != nil {
 		return out, true, err
 	}
 	*bytes += res.Bytes

@@ -77,7 +77,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 		defer func() { _ = executor.sandbox.Close() }()
 	}
 
-	o := orchestrate.New(st, executor.local, clock)
+	o := orchestrate.New(st, executor.local, clock).WithLogger(log)
 	al := newAlerter(notifier, st, cfg.Drills, clock)
 	runFunc := func(rctx context.Context, d config.Drill) error {
 		src, ok := findSource(cfg, d.Source)

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -107,14 +108,14 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scratch, dumpSrc string, red *redact.Redactor) (StepResult, error) {
 	res := StepResult{Level: step.Level}
 	l3 := step.L3
-	loaded, format, err := stageDump(dumpSrc, sc.root)
+	loaded, format, err := stageDump(dumpSrc, sc.root, sc.maxBytes)
 	if err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
 
 	imageMajor := pgMajor(l3.Sandbox.Image)
 	if format == "plain" && versionTrap(plainDumpMajor(loaded), imageMajor) {
-		return versionTrapResult(res, plainDumpMajor(loaded), imageMajor, dumpSrc), nil
+		return versionTrapResult(res, plainDumpMajor(loaded), imageMajor, dumpSrc, red), nil
 	}
 
 	sb, err := e.sandbox.Start(ctx, l3Spec(step, loaded))
@@ -128,12 +129,18 @@ func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scr
 
 	if format == "custom" {
 		if dm := customDumpMajor(ctx, sb); versionTrap(dm, imageMajor) {
-			return versionTrapResult(res, dm, imageMajor, dumpSrc), nil
+			return versionTrapResult(res, dm, imageMajor, dumpSrc, red), nil
 		}
 	}
 
-	res.Evidence = append(res.Evidence, loadDump(ctx, sb, format))
-	db := targetDB(ctx, sb)
+	// Snapshot the databases before loading so loadedDB can distinguish the
+	// database the dump creates from one the image pre-created (e.g. POSTGRES_DB).
+	before := listDatabases(ctx, sb)
+	loadEv := loadDump(ctx, sb, resolveLoader(l3.Load, format))
+	redactEvidence(red, &loadEv)
+	res.Evidence = append(res.Evidence, loadEv)
+
+	db := loadedDB(ctx, sb, before)
 	env := checks.CheckEnv{Sandbox: sb, Now: step.Now}
 	for _, cc := range l3.Checks {
 		c := buildL3Check(cc, db)
@@ -189,13 +196,28 @@ func buildL3Check(cc config.Check, db string) checks.Check {
 	return nil
 }
 
-// loadDump runs pg_restore (custom) or psql (plain). Load errors are tolerated
-// and counted — the sql asserts give the verdict (DESIGN §6); only an inability
-// to run the loader at all is an error here.
-func loadDump(ctx context.Context, sb sandbox.Sandbox, format string) checks.Evidence {
+// resolveLoader picks which loader to run: an explicit load: pg_restore|psql in
+// the drill config wins; otherwise (auto) it follows the detected dump format
+// (custom → pg_restore, plain → psql).
+func resolveLoader(load, format string) string {
+	switch load {
+	case "pg_restore", "psql":
+		return load
+	default:
+		if format == "custom" {
+			return "pg_restore"
+		}
+		return "psql"
+	}
+}
+
+// loadDump runs the chosen loader. Load errors are tolerated and counted — the
+// sql asserts give the verdict (DESIGN §6); only an inability to run the loader
+// at all is an error here.
+func loadDump(ctx context.Context, sb sandbox.Sandbox, loader string) checks.Evidence {
 	ev := checks.Evidence{Kind: "load", Target: containerDumpPath, Expected: "dump loads"}
 	cmd := []string{"psql", "-U", "postgres", "-d", "postgres", "-f", containerDumpPath}
-	if format == "custom" {
+	if loader == "pg_restore" {
 		cmd = []string{"pg_restore", "--no-owner", "--no-privileges", "-U", "postgres", "-d", "postgres", containerDumpPath}
 	}
 	res, err := sb.Exec(ctx, cmd)
@@ -208,17 +230,39 @@ func loadDump(ctx context.Context, sb sandbox.Sandbox, format string) checks.Evi
 	return ev
 }
 
-func targetDB(ctx context.Context, sb sandbox.Sandbox) string {
+// listDatabases returns the non-template databases present in the sandbox.
+func listDatabases(ctx context.Context, sb sandbox.Sandbox) map[string]bool {
+	set := map[string]bool{}
 	res, err := sb.Exec(ctx, []string{
 		"psql", "-U", "postgres", "-tAqX", "-c",
-		"select datname from pg_database where not datistemplate and datname <> 'postgres' order by datname",
+		"select datname from pg_database where not datistemplate order by datname",
 	})
-	if err == nil && res.ExitCode == 0 {
-		for _, line := range strings.Split(res.Stdout, "\n") {
-			if db := strings.TrimSpace(line); db != "" {
-				return db
-			}
+	if err != nil || res.ExitCode != 0 {
+		return set
+	}
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if db := strings.TrimSpace(line); db != "" {
+			set[db] = true
 		}
+	}
+	return set
+}
+
+// loadedDB picks the database the dump populated. A dump may CREATE its own
+// database, so prefer one that appeared only after the load (diffed against
+// before). Falls back to postgres — where loadDump targets — so a database the
+// image pre-created (POSTGRES_DB) but the dump never wrote is not mistaken for
+// the restored data.
+func loadedDB(ctx context.Context, sb sandbox.Sandbox, before map[string]bool) string {
+	var created []string
+	for db := range listDatabases(ctx, sb) {
+		if !before[db] && db != "postgres" {
+			created = append(created, db)
+		}
+	}
+	if len(created) > 0 {
+		sort.Strings(created)
+		return created[0]
 	}
 	return "postgres"
 }
@@ -227,7 +271,7 @@ func versionTrap(dumpMajor, imageMajor int) bool {
 	return dumpMajor > 0 && imageMajor > 0 && dumpMajor > imageMajor
 }
 
-func versionTrapResult(res StepResult, dumpMajor, imageMajor int, dumpSrc string) StepResult {
+func versionTrapResult(res StepResult, dumpMajor, imageMajor int, dumpSrc string, red *redact.Redactor) StepResult {
 	ev := checks.Evidence{
 		Kind:     "load",
 		Target:   filepath.Base(dumpSrc),
@@ -235,17 +279,18 @@ func versionTrapResult(res StepResult, dumpMajor, imageMajor int, dumpSrc string
 		Actual:   fmt.Sprintf("dump is from postgres %d — version trap", dumpMajor),
 		Status:   checks.Fail,
 	}
+	redactEvidence(red, &ev)
 	res.Evidence = append(res.Evidence, ev)
 	res.Status = checks.Fail
-	res.Summary = "version trap: " + ev.Actual
+	res.Summary = red.Redact("version trap: " + ev.Actual)
 	return res
 }
 
-// stageDump decompresses (or copies) the source dump into scratch and reports
-// its pg_dump format (custom vs plain).
-func stageDump(src, scratchRoot string) (string, string, error) {
+// stageDump decompresses (or copies) the source dump into scratch — bounded by
+// the scratch byte quota — and reports its pg_dump format (custom vs plain).
+func stageDump(src, scratchRoot string, maxBytes int64) (string, string, error) {
 	loaded := filepath.Join(scratchRoot, "dump")
-	if err := decompressTo(src, loaded); err != nil {
+	if err := decompressTo(src, loaded, maxBytes); err != nil {
 		return "", "", fmt.Errorf("stage dump %s: %w", filepath.Base(src), err)
 	}
 	format, err := dumpFormat(loaded)
@@ -255,7 +300,7 @@ func stageDump(src, scratchRoot string) (string, string, error) {
 	return loaded, format, nil
 }
 
-func decompressTo(src, dst string) error {
+func decompressTo(src, dst string, maxBytes int64) error {
 	in, err := os.Open(src) //nolint:gosec // G304: dump path is operator-configured / internal scratch
 	if err != nil {
 		return err
@@ -271,6 +316,7 @@ func decompressTo(src, dst string) error {
 		return err
 	}
 	defer func() { _ = out.Close() }()
+	w := quotaWriter(out, maxBytes) // bound the decompressed output by the scratch quota
 
 	switch {
 	case n >= 2 && magic[0] == 0x1f && magic[1] == 0x8b:
@@ -279,7 +325,7 @@ func decompressTo(src, dst string) error {
 			return err
 		}
 		defer func() { _ = zr.Close() }()
-		_, err = io.Copy(out, zr) //nolint:gosec // G110: the operator's own dump; size is bounded by scratch quota and the run timeout
+		_, err = io.Copy(w, zr) //nolint:gosec // G110: decompressed output is bounded by quotaWriter (the scratch byte quota)
 		return err
 	case n >= 4 && magic[0] == 0x28 && magic[1] == 0xb5 && magic[2] == 0x2f && magic[3] == 0xfd:
 		zr, err := zstd.NewReader(in)
@@ -287,12 +333,43 @@ func decompressTo(src, dst string) error {
 			return err
 		}
 		defer zr.Close()
-		_, err = io.Copy(out, zr)
+		_, err = io.Copy(w, zr)
 		return err
 	default:
-		_, err = io.Copy(out, in)
+		_, err = io.Copy(w, in)
 		return err
 	}
+}
+
+// errScratchQuota marks a stage that would exceed the scratch byte quota. The
+// orchestrator records it as error (the auditor declined to run), never fail —
+// the backup is not the problem (DESIGN §9.6).
+var errScratchQuota = errors.New("scratch quota exceeded")
+
+// quotaWriter bounds w to maxBytes (0 = unbounded), so decompressing a dump that
+// expands past the scratch quota fails with errScratchQuota instead of filling
+// the disk — the L3 counterpart to the L2 preflight.
+func quotaWriter(w io.Writer, maxBytes int64) io.Writer {
+	if maxBytes <= 0 {
+		return w
+	}
+	return &limitedWriter{w: w, remaining: maxBytes}
+}
+
+type limitedWriter struct {
+	w         io.Writer
+	remaining int64
+}
+
+func (l *limitedWriter) Write(p []byte) (int, error) {
+	if int64(len(p)) > l.remaining {
+		n, _ := l.w.Write(p[:l.remaining])
+		l.remaining -= int64(n)
+		return n, errScratchQuota
+	}
+	n, err := l.w.Write(p)
+	l.remaining -= int64(n)
+	return n, err
 }
 
 func dumpFormat(path string) (string, error) {
@@ -309,12 +386,28 @@ func dumpFormat(path string) (string, error) {
 }
 
 var (
-	imageTagRe = regexp.MustCompile(`:(\d+)`)
+	tagMajorRe = regexp.MustCompile(`^(\d+)`)
 	versionRe  = regexp.MustCompile(`(?i)dumped from database version (\d+)`)
 )
 
+// pgMajor extracts the postgres major from an image reference's tag — e.g.
+// "postgres:16" or "registry.example.com:5000/library/postgres:16.2" → 16. A
+// digest pin or a non-numeric tag (":latest") yields 0, disabling the version
+// trap (we can't tell the major). Crucially it never mistakes a registry port
+// (host:5000/…) for the tag.
 func pgMajor(image string) int {
-	m := imageTagRe.FindStringSubmatch(image)
+	ref := image
+	if i := strings.IndexByte(ref, '@'); i >= 0 { // drop a digest: "…@sha256:…"
+		ref = ref[:i]
+	}
+	if i := strings.LastIndexByte(ref, '/'); i >= 0 { // drop the registry/path: "host:5000/…"
+		ref = ref[i+1:]
+	}
+	i := strings.LastIndexByte(ref, ':')
+	if i < 0 {
+		return 0 // no tag
+	}
+	m := tagMajorRe.FindStringSubmatch(ref[i+1:])
 	if m == nil {
 		return 0
 	}

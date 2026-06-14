@@ -99,3 +99,32 @@ func TestIntegrationJanitor(t *testing.T) {
 		t.Errorf("janitor removed %d labeled containers, want >= 1", n)
 	}
 }
+
+// A container that exits during boot (postgres with no password / trust auth)
+// must fail readiness fast — Start returns promptly with a "container exited"
+// error instead of polling pg_isready until the context deadline.
+func TestIntegrationReadyFailsFastOnExit(t *testing.T) {
+	rt := newRuntime(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	sb, err := rt.Start(ctx, sandbox.SandboxSpec{
+		Image:    "postgres:16", // no POSTGRES_PASSWORD/HOST_AUTH_METHOD → entrypoint exits non-zero
+		Network:  "none",
+		Labels:   map[string]string{sandbox.RunLabel: "fail-fast"},
+		ReadyCmd: []string{"pg_isready", "-U", "postgres"},
+	})
+	if sb != nil {
+		_ = sb.Close(ctx)
+	}
+	if err == nil {
+		t.Fatal("Start: want an error for a container that exits during init")
+	}
+	if !strings.Contains(err.Error(), "exited") {
+		t.Errorf("err = %v, want it to name the container exit (fail-fast, not a deadline)", err)
+	}
+	if d := time.Since(start); d > 60*time.Second {
+		t.Errorf("Start took %s — waitReady likely polled to the deadline instead of failing fast", d)
+	}
+}

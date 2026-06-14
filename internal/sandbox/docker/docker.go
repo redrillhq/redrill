@@ -173,11 +173,17 @@ func (s *dockerSandbox) Close(ctx context.Context) error {
 	return nil
 }
 
-// waitReady polls cmd until it exits 0 or the context ends.
+// waitReady polls cmd until it exits 0, the container dies, or the context ends.
+// Detecting a dead container matters: a postgres that crashes on boot (tight
+// memory limit, bad image, corrupt init) would otherwise be polled until the
+// deadline; failing fast turns that into a prompt, clear error.
 func (s *dockerSandbox) waitReady(ctx context.Context, cmd []string) error {
 	for {
 		if res, err := s.Exec(ctx, cmd); err == nil && res.ExitCode == 0 {
 			return nil
+		}
+		if status, code, ok := s.terminalState(ctx); ok {
+			return fmt.Errorf("container exited before ready (status %s, exit %d)", status, code)
 		}
 		select {
 		case <-ctx.Done():
@@ -185,6 +191,20 @@ func (s *dockerSandbox) waitReady(ctx context.Context, cmd []string) error {
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
+}
+
+// terminalState reports whether the container has stopped for good (exited or
+// dead) along with its exit code; ok is false if the container is still
+// alive/starting or its state can't be read.
+func (s *dockerSandbox) terminalState(ctx context.Context) (status string, exitCode int, ok bool) {
+	insp, err := s.cli.ContainerInspect(ctx, s.id)
+	if err != nil || insp.State == nil {
+		return "", 0, false
+	}
+	if insp.State.Status == "exited" || insp.State.Status == "dead" {
+		return insp.State.Status, insp.State.ExitCode, true
+	}
+	return "", 0, false
 }
 
 func (s *dockerSandbox) copyIn(ctx context.Context, f sandbox.FileInject) error {

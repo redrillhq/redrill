@@ -68,43 +68,72 @@ func (c CompressionTest) Run(_ context.Context, _ CheckEnv) (Evidence, error) {
 	switch ext := strings.ToLower(filepath.Ext(c.Path)); ext {
 	case ".gz", ".gzip":
 		ev.Expected = "valid gzip"
-		setCompressionResult(&ev, testGzip(f))
+		cErr, ioFail := testGzip(f)
+		setCompressionResult(&ev, cErr, ioFail)
 	case ".zst", ".zstd":
 		ev.Expected = "valid zstd"
-		setCompressionResult(&ev, testZstd(f))
+		cErr, ioFail := testZstd(f)
+		setCompressionResult(&ev, cErr, ioFail)
 	default:
 		ev.Status, ev.Expected, ev.Actual = Error, "gzip or zstd by extension", "unrecognized extension "+ext
 	}
 	return ev, nil
 }
 
-func setCompressionResult(ev *Evidence, err error) {
-	if err != nil {
+// setCompressionResult maps the decompression outcome to a verdict, keeping
+// fail≠error: a stream that won't decompress is a corrupt dump (fail), but a
+// failure to read the bytes off disk is the auditor's problem (error).
+func setCompressionResult(ev *Evidence, err error, ioFailure bool) {
+	switch {
+	case err == nil:
+		ev.Status, ev.Actual = Pass, "ok"
+	case ioFailure:
+		ev.Status, ev.Actual = Error, "read: "+err.Error()
+	default:
 		ev.Status, ev.Actual = Fail, err.Error()
-		return
 	}
-	ev.Status, ev.Actual = Pass, "ok"
 }
 
-func testGzip(r io.Reader) error {
-	zr, err := gzip.NewReader(r)
+// ioErrReader records the last underlying read error (other than EOF) so a
+// disk/transport failure can be told apart from a genuine decompression failure
+// on bytes that read fine.
+type ioErrReader struct {
+	r   io.Reader
+	err error
+}
+
+func (e *ioErrReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err != nil && err != io.EOF {
+		e.err = err
+	}
+	return n, err
+}
+
+// testGzip decompresses the whole stream. It returns the decompression error (if
+// any) and whether that error came from the underlying reader (an I/O failure)
+// rather than the gzip data itself — so the caller can keep fail≠error.
+func testGzip(r io.Reader) (error, bool) {
+	er := &ioErrReader{r: r}
+	zr, err := gzip.NewReader(er)
 	if err != nil {
-		return err
+		return err, er.err != nil
 	}
 	defer func() { _ = zr.Close() }()
 	//nolint:gosec // G110: integrity verification must read the whole stream (gzip's CRC/length live at the end); output is discarded (streamed, not buffered), and run time is bounded by the drill timeout.
 	_, err = io.Copy(io.Discard, zr)
-	return err
+	return err, er.err != nil
 }
 
-func testZstd(r io.Reader) error {
-	zr, err := zstd.NewReader(r)
+func testZstd(r io.Reader) (error, bool) {
+	er := &ioErrReader{r: r}
+	zr, err := zstd.NewReader(er)
 	if err != nil {
-		return err
+		return err, er.err != nil
 	}
 	defer zr.Close()
 	_, err = io.Copy(io.Discard, zr)
-	return err
+	return err, er.err != nil
 }
 
 // MaxAge fails if the dump file's mtime is older than Max (catching a stale

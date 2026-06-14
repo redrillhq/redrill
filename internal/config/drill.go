@@ -82,7 +82,7 @@ func (d *Drill) validate(path, srcType string, es *errset) {
 		d.Levels.L2.validate(path+".levels.l2", es)
 	}
 	if d.Levels.L3 != nil {
-		d.Levels.L3.validate(path+".levels.l3", es)
+		d.Levels.L3.validate(path+".levels.l3", srcType, es)
 	}
 }
 
@@ -123,7 +123,7 @@ func (l *L2) validate(path string, es *errset) {
 	}
 }
 
-func (l *L3) validate(path string, es *errset) {
+func (l *L3) validate(path, srcType string, es *errset) {
 	if l.Sandbox.Image == "" {
 		es.add(path+".sandbox.image", "required")
 	}
@@ -132,6 +132,18 @@ func (l *L3) validate(path string, es *errset) {
 	}
 	if l.Load != "" && l.Load != "auto" && l.Load != "pg_restore" && l.Load != "psql" {
 		es.add(path+".load", "must be auto, pg_restore, or psql, got %q", l.Load)
+	}
+	// borg archives hold a tree; L3 needs to know which dump to extract. dumpdir
+	// sources are already a single file, so extract_path is borg-only (and the
+	// executor refuses a borg L3 without it).
+	if srcType == "borg" && l.ExtractPath == "" {
+		es.add(path+".extract_path", "required for a borg L3 (the dump to extract from the archive)")
+	}
+	// An L3 with no checks would boot a sandbox, load the dump, and prove nothing
+	// — a load that merely ran is not a verdict (DESIGN §4, §6). Require a real
+	// assertion so a healthy-looking run can never be a silent pass.
+	if len(l.Checks) == 0 {
+		es.add(path+".checks", "at least one check is required (an L3 with no checks proves nothing)")
 	}
 	for i := range l.Checks {
 		l.Checks[i].validate(checkPath(path, i), "l3", es)

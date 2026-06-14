@@ -162,6 +162,8 @@ func TestParseErrors(t *testing.T) {
 		{"sql missing query", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l3: {sandbox: {image: p}, checks: [{sql: {expect: \"> 0\"}}]}}}]\n", "sql requires a query"},
 		{"sql missing expect", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l3: {sandbox: {image: p}, checks: [{sql: {query: q}}]}}}]\n", "expect predicate"},
 		{"path_exists empty", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l2: {checks: [{path_exists: \"\"}]}}}]\n", "path_exists requires a path"},
+		{"l3 no checks", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: dumpdir, path: /p, pattern: \"*.gz\"}]\ndrills: [{name: d, source: s, schedule: x, levels: {l3: {sandbox: {image: p}}}}]\n", "at least one check"},
+		{"borg l3 missing extract_path", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l3: {sandbox: {image: p}, checks: [{sql_no_error: q}]}}}]\n", "extract_path"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

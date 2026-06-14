@@ -3,6 +3,7 @@ package checks
 import (
 	"compress/gzip"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -144,6 +145,37 @@ func TestCompressionTestZstd(t *testing.T) {
 	write(t, garbage, "definitely not a zstd frame")
 	if ev := run(t, CompressionTest{Path: garbage}); ev.Status != Fail {
 		t.Errorf("garbage zstd: status %s, want fail", ev.Status)
+	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("disk read failed") }
+
+// A read failure while decompressing is the auditor's problem (error), not a
+// corrupt dump (fail): testGzip must report it came from the underlying reader.
+func TestCompressionIOFailureDetected(t *testing.T) {
+	t.Parallel()
+	if err, ioFailure := testGzip(&failingReader{}); err == nil || !ioFailure {
+		t.Errorf("testGzip(failing) = (%v, %v), want (non-nil err, true)", err, ioFailure)
+	}
+}
+
+// setCompressionResult keeps fail≠error: I/O failure → error, bad stream → fail.
+func TestSetCompressionResult(t *testing.T) {
+	t.Parallel()
+	var ev Evidence
+	setCompressionResult(&ev, errors.New("eio"), true)
+	if ev.Status != Error {
+		t.Errorf("io failure → %s, want error", ev.Status)
+	}
+	setCompressionResult(&ev, errors.New("bad gzip stream"), false)
+	if ev.Status != Fail {
+		t.Errorf("corruption → %s, want fail", ev.Status)
+	}
+	setCompressionResult(&ev, nil, false)
+	if ev.Status != Pass {
+		t.Errorf("clean → %s, want pass", ev.Status)
 	}
 }
 

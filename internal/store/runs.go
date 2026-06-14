@@ -125,6 +125,30 @@ func (s *Store) LastRunWithResult(ctx context.Context, drill string, result Resu
 	return r, true, nil
 }
 
+// LatestFinishedRun returns a drill's most recent run with a recorded verdict
+// (any of pass/fail/error), ok=false if none. An unfinished run is skipped.
+func (s *Store) LatestFinishedRun(ctx context.Context, drill string) (Run, bool, error) {
+	q := `SELECT ` + runColumns + ` FROM runs WHERE drill = ? AND result IS NOT NULL ORDER BY id DESC LIMIT 1`
+	r, err := scanRun(s.db.QueryRowContext(ctx, q, drill))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, false, nil
+	}
+	if err != nil {
+		return Run{}, false, fmt.Errorf("latest finished run for %s: %w", drill, err)
+	}
+	return r, true, nil
+}
+
+// SumBytesRestored totals bytes_restored across a drill's runs; 0 if none.
+func (s *Store) SumBytesRestored(ctx context.Context, drill string) (int64, error) {
+	var n sql.NullInt64 // SUM over no rows is NULL
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT SUM(bytes_restored) FROM runs WHERE drill = ?`, drill).Scan(&n); err != nil {
+		return 0, fmt.Errorf("sum bytes restored for %s: %w", drill, err)
+	}
+	return n.Int64, nil
+}
+
 func scanRun(sc scanner) (Run, error) {
 	var (
 		r        Run

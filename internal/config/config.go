@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 
@@ -116,6 +118,16 @@ func (c *Config) Validate() error {
 	for i, ev := range c.Notify.Events {
 		if !notifyEvents[ev] {
 			es.add(fmt.Sprintf("notify.events[%d]", i), "unknown event %q", ev)
+		}
+	}
+	if c.Server.Listen != "" {
+		if _, _, err := net.SplitHostPort(c.Server.Listen); err != nil {
+			es.add("server.listen", "invalid listen address %q", c.Server.Listen)
+		}
+	}
+	if u := c.Notify.HealthchecksURL; u != "" {
+		if parsed, err := url.Parse(u); err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			es.add("notify.healthchecks_url", "must be an http(s) URL, got %q", u)
 		}
 	}
 

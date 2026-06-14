@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -20,6 +22,7 @@ import (
 	"github.com/alyamovsky/redrill/internal/orchestrate"
 	"github.com/alyamovsky/redrill/internal/sandbox/docker"
 	"github.com/alyamovsky/redrill/internal/scheduler"
+	"github.com/alyamovsky/redrill/internal/server"
 	"github.com/alyamovsky/redrill/internal/store"
 )
 
@@ -79,25 +82,70 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 
 	o := orchestrate.New(st, executor.local, clock).WithLogger(log)
 	al := newAlerter(notifier, st, cfg.Drills, clock)
-	runFunc := func(rctx context.Context, d config.Drill) error {
+	runOnce := func(rctx context.Context, d config.Drill, trigger store.Trigger) error {
 		src, ok := findSource(cfg, d.Source)
 		if !ok {
 			return fmt.Errorf("drill %s: no such source %q", d.Name, d.Source)
 		}
-		res, err := o.Run(rctx, d, *src, orchestrate.RunOptions{Trigger: store.TriggerSchedule, Scratch: cfg.Scratch})
+		res, err := o.Run(rctx, d, *src, orchestrate.RunOptions{Trigger: trigger, Scratch: cfg.Scratch})
 		if err != nil {
 			return err
 		}
 		log.Info("drill finished", "drill", d.Name, "result", string(res.Status),
-			"level", res.LevelReached, "run_id", res.RunID)
+			"level", res.LevelReached, "run_id", res.RunID, "trigger", string(trigger))
 		al.afterRun(rctx, d, res)
 		return nil
 	}
+	runFunc := func(rctx context.Context, d config.Drill) error { return runOnce(rctx, d, store.TriggerSchedule) }
 
-	sched, err := scheduler.New(cfg.Drills, runFunc, scheduler.Options{Concurrency: cfg.Concurrency, Logger: log})
+	// One single-flight gate, shared between the scheduler and API-triggered runs
+	// so a manual "Run now" never overlaps a scheduled run (DESIGN §9.6).
+	gate := make(chan struct{}, cfg.Concurrency)
+	var apiWG sync.WaitGroup
+	apiTrigger := func(name string) error {
+		d, _, ok := findDrill(cfg, name)
+		if !ok {
+			return fmt.Errorf("no such drill %q", name)
+		}
+		select {
+		case gate <- struct{}{}:
+		default:
+			return server.ErrBusy
+		}
+		apiWG.Add(1)
+		go func() {
+			defer apiWG.Done()
+			defer func() { <-gate }()
+			rctx := ctx
+			if to := d.Timeout.Duration(); to > 0 {
+				var cancel context.CancelFunc
+				rctx, cancel = context.WithTimeout(ctx, to)
+				defer cancel()
+			}
+			if err := runOnce(rctx, *d, store.TriggerAPI); err != nil {
+				log.Error("api-triggered drill failed", "drill", name, "error", err.Error())
+			}
+		}()
+		return nil
+	}
+
+	hcURL := cfg.Notify.HealthchecksURL
+	onCycle := func() {
+		if hcURL != "" {
+			go pingHealthchecks(ctx, hcURL, log)
+		}
+	}
+	sched, err := scheduler.New(cfg.Drills, runFunc, scheduler.Options{
+		Concurrency: cfg.Concurrency, Logger: log, Gate: gate, OnCycle: onCycle,
+	})
 	if err != nil {
 		log.Error("invalid schedule", "error", err.Error())
 		return 3
+	}
+
+	httpSrv, code := startHTTP(ctx, cfg, st, clock, apiTrigger, log)
+	if code != 0 {
+		return code
 	}
 
 	// The staleness sweeper runs alongside the scheduler; both stop on ctx cancel.
@@ -109,6 +157,15 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 
 	log.Info("redrill serving", "drills", len(cfg.Drills), "concurrency", cfg.Concurrency)
 	runErr := sched.Run(ctx)
+
+	// Stop accepting new HTTP triggers, then drain in-flight API runs before the
+	// deferred store close so no background run writes to a closed store.
+	if httpSrv != nil {
+		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_ = httpSrv.Shutdown(shutCtx)
+		cancel()
+	}
+	apiWG.Wait()
 	wg.Wait()
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
 		log.Error("scheduler stopped with error", "error", runErr.Error())
@@ -116,6 +173,53 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 	}
 	log.Info("redrill stopped")
 	return 0
+}
+
+// startHTTP builds and starts the HTTP API server when server.listen is set,
+// returning the server (nil if disabled) and a non-zero exit code on failure.
+func startHTTP(ctx context.Context, cfg *config.Config, st *store.Store, clock func() time.Time, trigger server.TriggerFunc, log *slog.Logger) (*http.Server, int) {
+	if cfg.Server.Listen == "" {
+		log.Info("http api disabled (no server.listen configured)")
+		return nil, 0
+	}
+	srv, err := server.New(server.Options{Store: st, Config: cfg, Now: clock, Trigger: trigger, Logger: log})
+	if err != nil {
+		log.Error("invalid server config", "error", err.Error())
+		return nil, 3
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", cfg.Server.Listen)
+	if err != nil {
+		log.Error("cannot listen", "addr", cfg.Server.Listen, "error", err.Error())
+		return nil, 2
+	}
+	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		log.Info("http api listening", "addr", cfg.Server.Listen)
+		if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("http server stopped with error", "error", err.Error())
+		}
+	}()
+	return httpSrv, 0
+}
+
+// pingHealthchecks sends a bounded dead-man heartbeat GET; failures are logged,
+// never fatal — a flaky monitor must not affect drills.
+func pingHealthchecks(ctx context.Context, url string, log *slog.Logger) {
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(pingCtx, http.MethodGet, url, nil)
+	if err != nil {
+		log.Warn("healthcheck ping: bad url", "url", url, "error", err.Error())
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Warn("healthcheck ping failed", "error", err.Error())
+		return
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 }
 
 // executorBundle keeps the sandbox handle alongside the executor so serve can close it.

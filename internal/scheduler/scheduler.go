@@ -43,16 +43,25 @@ type Options struct {
 	Clock       Clock
 	Logger      *slog.Logger
 	Rng         func() float64 // jitter fraction in [0,1); injectable for tests
+	// Gate, when non-nil, is the single-flight token bucket (cap = concurrency).
+	// Supplying it lets out-of-band triggers (the API's Run now) share the same
+	// gate, so a manual run and a scheduled run never overlap.
+	Gate chan struct{}
+	// OnCycle, when set, runs once per scheduler loop iteration after due jobs
+	// are dispatched — the seam for the healthchecks dead-man ping. It must not
+	// block (the cmd wiring fires the ping asynchronously).
+	OnCycle func()
 }
 
 type Scheduler struct {
-	clock Clock
-	run   RunFunc
-	log   *slog.Logger
-	rng   func() float64
-	sem   chan struct{} // single-flight token bucket, cap = concurrency
-	jobs  []*job
-	wg    sync.WaitGroup // in-flight runs, for graceful shutdown
+	clock   Clock
+	run     RunFunc
+	log     *slog.Logger
+	rng     func() float64
+	sem     chan struct{} // single-flight token bucket, cap = concurrency
+	onCycle func()
+	jobs    []*job
+	wg      sync.WaitGroup // in-flight runs, for graceful shutdown
 }
 
 // New parses each schedule up front; an invalid schedule is a configuration error.
@@ -69,12 +78,17 @@ func New(drills []config.Drill, run RunFunc, opts Options) (*Scheduler, error) {
 	if opts.Rng == nil {
 		opts.Rng = rand.Float64
 	}
+	sem := opts.Gate
+	if sem == nil {
+		sem = make(chan struct{}, opts.Concurrency)
+	}
 	s := &Scheduler{
-		clock: opts.Clock,
-		run:   run,
-		log:   opts.Logger,
-		rng:   opts.Rng,
-		sem:   make(chan struct{}, opts.Concurrency),
+		clock:   opts.Clock,
+		run:     run,
+		log:     opts.Logger,
+		rng:     opts.Rng,
+		sem:     sem,
+		onCycle: opts.OnCycle,
 	}
 	now := s.clock.Now()
 	for i := range drills {
@@ -100,6 +114,11 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		due, next := s.due(now)
 		for _, j := range due {
 			s.dispatch(ctx, j)
+		}
+		// One heartbeat per cycle: fires at startup and on every wake, so a
+		// dead-man monitor (healthchecks) learns the daemon is alive.
+		if s.onCycle != nil {
+			s.onCycle()
 		}
 
 		var wake <-chan time.Time

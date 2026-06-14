@@ -45,6 +45,29 @@ systemctl enable --now redrill
 For L3, add `redrill` to the `docker` group (uncomment `SupplementaryGroups=docker`
 in the unit) or use rootless podman.
 
+## HTTP API & metrics
+
+Set `server.listen` (e.g. `":8090"`) to expose the read-only REST API and
+Prometheus metrics; omit it to run headless. The API is read-only by design —
+the only mutating endpoint is the run trigger.
+
+```
+GET  /healthz                          # liveness
+GET  /metrics                          # Prometheus (redrill_proof_sla_ok, …)
+GET  /api/v1/drills                    # per-drill status: proof age, next run, SLA
+GET  /api/v1/drills/{name}/runs        # run history (?n=20)
+GET  /api/v1/runs/{id}                 # steps, per-check evidence, artifacts
+POST /api/v1/drills/{name}/run         # "Run now" (rate-limited; 409 if busy)
+```
+
+- **Auth.** Optional `server.basic_auth_file` (htpasswd, **bcrypt only** — `htpasswd -B`)
+  gates `/api/*`; `/healthz` and `/metrics` stay open for probes/scrapes. Basic auth
+  is a convenience — front the daemon with a reverse proxy for TLS. The compose example
+  binds the port to `127.0.0.1` for that reason.
+- **Dead-man ping.** Set `notify.healthchecks_url` to have redrill ping a monitor
+  (e.g. healthchecks.io) each scheduler cycle, so you're alerted if the daemon itself
+  goes down. Set the check's expected period to your drill cadence.
+
 ## After deploying
 
 ```sh

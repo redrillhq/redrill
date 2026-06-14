@@ -168,6 +168,45 @@ func TestRunDispatchesThenStops(t *testing.T) {
 	}
 }
 
+func TestSharedGate(t *testing.T) {
+	t.Parallel()
+	gate := make(chan struct{}, 1)
+	s, err := New([]config.Drill{{Name: "d", Schedule: "Sun 04:10"}}, nil, Options{Gate: gate, Logger: discardLogger()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.sem != gate {
+		t.Fatal("scheduler did not adopt the supplied Gate as its single-flight bucket")
+	}
+	// An out-of-band holder of the shared gate blocks the scheduler from dispatching.
+	gate <- struct{}{}
+	var ran atomic.Int32
+	s.run = func(_ context.Context, _ config.Drill) error { ran.Add(1); return nil }
+	s.dispatch(context.Background(), &job{drill: config.Drill{Name: "d"}})
+	s.wg.Wait()
+	if ran.Load() != 0 {
+		t.Fatal("dispatch ran while the shared gate was held; single-flight not honored across the seam")
+	}
+}
+
+func TestOnCycleFires(t *testing.T) {
+	t.Parallel()
+	ticks := make(chan struct{}, 4)
+	s, err := New(nil, nil, Options{Logger: discardLogger(), OnCycle: func() { ticks <- struct{}{} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = s.Run(ctx) }()
+
+	select {
+	case <-ticks: // the startup cycle fires the heartbeat even with no jobs
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnCycle never fired on the startup cycle")
+	}
+}
+
 func TestRunIdleNoJobs(t *testing.T) {
 	t.Parallel()
 	s, err := New(nil, nil, Options{Logger: discardLogger()})

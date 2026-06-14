@@ -146,6 +146,8 @@ func TestParseErrors(t *testing.T) {
 		{"concurrency negative", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nconcurrency: -1\n", "concurrency"},
 		{"nice io_class bad", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nnice: {io_class: turbo}\n", "io_class"},
 		{"notify event bad", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nnotify: {events: [boom]}\n", "notify.events[0]"},
+		{"server listen bad", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nserver: {listen: noport}\n", "server.listen"},
+		{"healthchecks url bad", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nnotify: {healthchecks_url: \"not a url\"}\n", "healthchecks_url"},
 		{"source name missing", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{type: borg, repo: r}]\n", "sources[0].name"},
 		{"source dup name", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}, {name: s, type: borg, repo: r2}]\n", "duplicate source"},
 		{"source type missing", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, repo: r}]\n", "sources[0].type"},

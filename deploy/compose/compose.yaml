@@ -14,6 +14,9 @@ services:
     container_name: redrill
     restart: unless-stopped
     command: ["serve", "-c", "/etc/redrill/config.yaml"]
+    ports:
+      - "127.0.0.1:8090:8090"   # read-only API + /metrics; needs server.listen in the config.
+                                # Bound to localhost — front with a reverse proxy for remote access.
     volumes:
       - ./config.example.yaml:/etc/redrill/config.yaml:ro
       - redrill-data:/var/lib/redrill                 # sqlite store + scratch

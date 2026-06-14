@@ -178,6 +178,49 @@ func TestFilesRestoredAndLastRunWithResult(t *testing.T) {
 	}
 }
 
+func TestLatestFinishedRunAndSumBytes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	// No runs yet.
+	if _, ok, err := s.LatestFinishedRun(ctx, "d"); err != nil || ok {
+		t.Fatalf("LatestFinishedRun on empty: ok=%v err=%v", ok, err)
+	}
+	if total, err := s.SumBytesRestored(ctx, "d"); err != nil || total != 0 {
+		t.Fatalf("SumBytesRestored on empty: %d err=%v", total, err)
+	}
+
+	id1, _ := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerSchedule, StartedAt: epoch})
+	if err := s.FinishRun(ctx, Run{ID: id1, Result: ResultPass, LevelReached: "l1", BytesRestored: 1000, FinishedAt: epoch.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	id2, _ := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerSchedule, StartedAt: epoch.Add(time.Hour)})
+	if err := s.FinishRun(ctx, Run{ID: id2, Result: ResultFail, LevelReached: "l2", BytesRestored: 500, FinishedAt: epoch.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	// A newer, still-running run must not count as the latest *finished* run.
+	if _, err := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerManual, StartedAt: epoch.Add(2 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+
+	last, ok, err := s.LatestFinishedRun(ctx, "d")
+	if err != nil || !ok {
+		t.Fatalf("LatestFinishedRun: ok=%v err=%v", ok, err)
+	}
+	if last.ID != id2 || last.Result != ResultFail {
+		t.Errorf("latest finished = id %d (%s), want id %d (fail)", last.ID, last.Result, id2)
+	}
+
+	// SUM counts every run with bytes, finished or not (the running run has 0).
+	if total, err := s.SumBytesRestored(ctx, "d"); err != nil || total != 1500 {
+		t.Errorf("SumBytesRestored = %d err=%v, want 1500", total, err)
+	}
+	if total, _ := s.SumBytesRestored(ctx, "ghost"); total != 0 {
+		t.Errorf("SumBytesRestored ghost = %d, want 0", total)
+	}
+}
+
 func TestStepsEvidenceArtifacts(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

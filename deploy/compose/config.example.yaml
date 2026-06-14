@@ -11,10 +11,15 @@ concurrency: 1
 nice: { cpu: 10, io_class: idle }
 bandwidth_limit: 40MiB
 
+server:
+  listen: ":8090"             # read-only REST API + Prometheus /metrics; omit to disable HTTP.
+  # basic_auth_file: /etc/redrill/htpasswd   # optional; bcrypt entries only (htpasswd -B). Reverse-proxy for TLS.
+
 notify:
   urls:
     - "ntfy://ntfy.example.com/redrill"   # any shoutrrr URL: ntfy, telegram, discord, email, webhook...
   events: [fail, error, recover, stale]
+  # healthchecks_url: "https://hc-ping.com/your-uuid"   # optional dead-man heartbeat, pinged each scheduler cycle
 
 sources:
   - name: pg-dumps

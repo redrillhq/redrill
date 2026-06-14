@@ -7,8 +7,7 @@ import (
 	"time"
 )
 
-// epoch is the deterministic base time for tests; the store carries no clock, so
-// every timestamp is supplied explicitly (TESTING.md determinism).
+// epoch is the deterministic base time for tests.
 var epoch = time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
 
 func newStore(t *testing.T) *Store {
@@ -88,7 +87,6 @@ func TestOpenIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Open: %v", err)
 	}
-	// Write a row, then reopen: a second migrate pass must not error or wipe data.
 	if err := s1.UpsertSource(ctx, Source{Name: "s", Type: "borg", CreatedAt: epoch}); err != nil {
 		t.Fatalf("UpsertSource: %v", err)
 	}
@@ -108,7 +106,6 @@ func TestOpenIsIdempotent(t *testing.T) {
 
 func TestOpenBadPath(t *testing.T) {
 	t.Parallel()
-	// A directory that does not exist cannot be created as a DB file.
 	_, err := Open(context.Background(), filepath.Join(t.TempDir(), "nope", "redrill.db"))
 	if err == nil {
 		t.Fatal("want error opening under a missing directory")

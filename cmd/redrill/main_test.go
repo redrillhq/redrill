@@ -196,8 +196,7 @@ func TestValidate(t *testing.T) {
 	})
 }
 
-// setupRunConfig writes a temp dumpdir holding one gzip dump (with mtime) and a
-// config pointing at it, and returns the config path.
+// setupRunConfig writes a dumpdir with one gzip dump plus a config, returning the config path.
 func setupRunConfig(t *testing.T, body string, mtime time.Time) string {
 	t.Helper()
 	tmp := t.TempDir()

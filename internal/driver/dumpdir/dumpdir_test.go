@@ -31,7 +31,7 @@ func TestListSnapshotsNewestFirst(t *testing.T) {
 	writeDump(t, dir, "app-3.sql.gz", "ccc", base)
 	writeDump(t, dir, "notes.txt", "ignore me", base) // non-matching
 	if err := os.Mkdir(filepath.Join(dir, "app-sub.sql.gz"), 0o755); err != nil {
-		t.Fatal(err) // a directory that matches the glob must be skipped
+		t.Fatal(err) // matching directory must be skipped
 	}
 
 	snaps, err := New(dir, "app-*.sql.gz").ListSnapshots(context.Background())
@@ -91,7 +91,6 @@ func TestRestoreCopiesReadOnly(t *testing.T) {
 	if err != nil || string(got) != "alpha" {
 		t.Errorf("restored a.sql.gz = %q, %v", got, err)
 	}
-	// Source must be untouched (read-only).
 	if _, err := os.Stat(filepath.Join(src, "a.sql.gz")); err != nil {
 		t.Errorf("source file disturbed: %v", err)
 	}

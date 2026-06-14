@@ -2,8 +2,7 @@ package store
 
 import "time"
 
-// Source mirrors the sources table (DESIGN §9.3). ConfigHash lets callers detect
-// config drift; the store does not interpret it.
+// ConfigHash is opaque to the store.
 type Source struct {
 	Name       string
 	Type       string
@@ -11,8 +10,7 @@ type Source struct {
 	CreatedAt  time.Time
 }
 
-// Drill mirrors the drills table. LevelsJSON is an opaque serialized blob the
-// store stores verbatim; MaxProofAge feeds staleness, computed elsewhere.
+// LevelsJSON is stored verbatim.
 type Drill struct {
 	Name        string
 	Source      string
@@ -21,7 +19,6 @@ type Drill struct {
 	LevelsJSON  string
 }
 
-// Trigger is how a run was started.
 type Trigger string
 
 const (
@@ -30,9 +27,8 @@ const (
 	TriggerAPI      Trigger = "api"
 )
 
-// Result is a finished run's verdict (DESIGN §9.8). A still-running run has the
-// empty Result. fail (the backup is bad) and error (redrill couldn't check)
-// are deliberately distinct everywhere.
+// Result is a finished run's verdict; a still-running run has the empty Result.
+// fail (backup is bad) and error (couldn't check) are deliberately distinct.
 type Result string
 
 const (
@@ -41,8 +37,7 @@ const (
 	ResultError Result = "error"
 )
 
-// Run mirrors the runs table. FinishedAt and Result stay zero/empty until the
-// run finishes via FinishRun.
+// FinishedAt and Result stay zero/empty until FinishRun.
 type Run struct {
 	ID            int64
 	Drill         string
@@ -57,8 +52,7 @@ type Run struct {
 	Executor      string
 }
 
-// RunStep mirrors the run_steps table. Idx is assigned by the store in insertion
-// order (AddStep appends).
+// Idx is assigned by the store on append.
 type RunStep struct {
 	RunID      int64
 	Idx        int
@@ -69,9 +63,8 @@ type RunStep struct {
 	Summary    string
 }
 
-// Evidence mirrors the evidence table: the expected/actual record for one check.
-// Weak flags comfort-only checks (e.g. canary_file) so reports never let them
-// masquerade as proof (DESIGN §4).
+// Weak flags comfort-only checks (e.g. canary_file) so reports never treat
+// them as proof.
 type Evidence struct {
 	RunID     int64
 	Idx       int
@@ -83,7 +76,7 @@ type Evidence struct {
 	Weak      bool
 }
 
-// Artifact mirrors the artifacts table: a redacted log or report on disk.
+// Artifact is a redacted log or report on disk.
 type Artifact struct {
 	RunID int64
 	Idx   int
@@ -92,8 +85,7 @@ type Artifact struct {
 	Bytes int64
 }
 
-// DrillState mirrors the drill_state table: the last proven timestamp for one
-// (drill, level), advanced only on a full pass via RecordProof.
+// DrillState is the last proven timestamp per (drill, level).
 type DrillState struct {
 	Drill        string
 	Level        string

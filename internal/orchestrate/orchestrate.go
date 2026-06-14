@@ -14,10 +14,8 @@ import (
 
 const statusSkipped = "skipped"
 
-// Orchestrator drives one run state machine per drill: plan → levels in order →
-// evidence → cleanup. It owns all run/step/evidence writing (the only package
-// besides store that touches run records). Engine/check work goes through the
-// Executor seam; the orchestrator never runs an engine directly.
+// Orchestrator drives one run state machine per drill and owns all
+// run/step/evidence writing. Engine/check work goes through the Executor seam.
 type Orchestrator struct {
 	store *store.Store
 	exec  exec.Executor
@@ -25,18 +23,16 @@ type Orchestrator struct {
 	host  string
 }
 
-// New builds an Orchestrator. now is the injected clock (UTC); the executor's
-// host labels runs.
+// now is the injected clock (UTC).
 func New(st *store.Store, ex exec.Executor, now func() time.Time) *Orchestrator {
 	return &Orchestrator{store: st, exec: ex, now: now, host: ex.Describe().Host}
 }
 
-// RunOptions configures one run.
 type RunOptions struct {
-	Trigger store.Trigger      // schedule | manual | api (default manual)
+	Trigger store.Trigger      // default manual
 	Level   string             // "" runs all configured levels in order; else only this one
-	Report  func(LevelOutcome) // optional: called per level as it completes (streaming)
-	Scratch config.Scratch     // where restores land (L2/L3) + the byte quota
+	Report  func(LevelOutcome) // optional, called per level
+	Scratch config.Scratch
 }
 
 // LevelOutcome is one level's result, for streaming and rendering.
@@ -47,7 +43,6 @@ type LevelOutcome struct {
 	Evidence []checks.Evidence
 }
 
-// RunResult is the whole run's outcome.
 type RunResult struct {
 	RunID        int64
 	Status       store.Result // pass | fail | error
@@ -60,10 +55,9 @@ type leveled struct {
 	on   bool
 }
 
-// Run executes drill against src, writing a run with its steps and evidence to
-// the store and advancing drill_state on a full pass. A returned error means the
-// run could not be carried out at all (store/usage failure); a completed run —
-// even a failing or erroring one — returns its verdict in RunResult.Status.
+// Run executes drill against src, writing its steps and evidence and advancing
+// drill_state on a full pass. A returned error means the run couldn't be carried
+// out at all; a completed run returns its verdict in RunResult.Status.
 func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.Source, opts RunOptions) (RunResult, error) {
 	levels, err := selectLevels(drill, opts.Level)
 	if err != nil {
@@ -81,8 +75,7 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	}
 	result := RunResult{RunID: runID}
 
-	// The file_count_tolerance baseline is the previous proven run's restored
-	// count — read here, orchestrator-side; checks never touch the store.
+	// file_count_tolerance baseline, read orchestrator-side since checks never touch the store.
 	prevFileCount := 0
 	if last, ok, err := o.store.LastRunWithResult(ctx, drill.Name, store.ResultPass); err == nil && ok {
 		prevFileCount = int(last.FilesRestored)
@@ -125,8 +118,7 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	return result, nil
 }
 
-// runLevel runs (or skips) one level, persisting its step and evidence. ran
-// reports whether the level actually executed (vs. skipped).
+// ran reports whether the level actually executed (vs. skipped).
 func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.Drill, src config.Source, lv leveled, start time.Time, shortCircuit bool, scratch config.Scratch, prevFileCount int, bytes *int64, files *int) (LevelOutcome, bool, error) {
 	if shortCircuit {
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (a lower level did not pass)"}
@@ -139,7 +131,7 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (level not implemented yet)"}
 		return out, false, o.recordStep(ctx, runID, out, start)
 	case errors.Is(err, exec.ErrNoSandboxRuntime):
-		// L3 with no container runtime degrades to skipped, never a silent pass.
+		// Degrades to skipped, never a silent pass.
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (no sandbox runtime)"}
 		return out, false, o.recordStep(ctx, runID, out, start)
 	case err != nil:
@@ -197,9 +189,8 @@ func (o *Orchestrator) buildStep(runID int64, drill config.Drill, src config.Sou
 	return spec
 }
 
-// selectLevels returns the configured levels in ascending order, optionally
-// filtered to a single one. Asking for a level the drill doesn't configure is a
-// usage error.
+// selectLevels returns configured levels ascending, optionally filtered to one.
+// Asking for an unconfigured level is a usage error.
 func selectLevels(drill config.Drill, only string) ([]leveled, error) {
 	all := []leveled{
 		{"l1", drill.Levels.L1 != nil},
@@ -222,9 +213,8 @@ func selectLevels(drill config.Drill, only string) ([]leveled, error) {
 	return out, nil
 }
 
-// aggregateRun folds level outcomes into the run verdict. fail dominates error
-// dominates pass; a run where nothing executed (all skipped/unimplemented) is an
-// error — the auditor proved nothing.
+// aggregateRun folds level outcomes into the run verdict: fail dominates error
+// dominates pass; nothing executed is an error (the auditor proved nothing).
 func aggregateRun(levels []LevelOutcome) store.Result {
 	ran, fail, errd := false, false, false
 	for _, lv := range levels {

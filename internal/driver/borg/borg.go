@@ -1,8 +1,4 @@
-// Package borg reads a BorgBackup repository by invoking the borg CLI (1.x).
-// It is read-only on the repository by construction: every borg invocation uses
-// a read-only subcommand (list, info, check, extract) — there is no path here
-// that runs create, delete, prune, compact, init, or any other repo-mutating
-// command, and a test asserts this across the constructed argv.
+// Package borg reads a BorgBackup repository via the borg CLI (1.x).
 package borg
 
 import (
@@ -21,15 +17,13 @@ import (
 	"github.com/alyamovsky/redrill/internal/driver"
 )
 
-// Runner runs a command and returns its stdout, stderr, and exit code. err is
-// non-nil only when the process could not be started (e.g. binary not found) or
-// the context was canceled — a non-zero exit is reported via exitCode, not err,
-// so callers can tell borg's "errors found" (check exit 1) from an operational
-// failure (exit ≥2). dir, when set, is the working directory (borg extract
-// writes to it).
+// Runner runs a command, returning stdout, stderr, and exit code. err is non-nil
+// only when the process could not start or the context was canceled; a non-zero
+// exit is reported via exitCode, so callers can tell borg's "errors found"
+// (check exit 1) from an operational failure (exit >=2). dir is the working
+// directory (borg extract writes to it).
 type Runner func(ctx context.Context, dir string, env []string, name string, args []string) (stdout, stderr []byte, exitCode int, err error)
 
-// Driver reads a borg repository at repo via the borg binary.
 type Driver struct {
 	repo       string
 	binary     string
@@ -38,10 +32,8 @@ type Driver struct {
 	run        Runner
 }
 
-// Option configures a Driver.
 type Option func(*Driver)
 
-// WithBinary overrides the borg binary (config `binary:` / version pin).
 func WithBinary(b string) Option {
 	return func(d *Driver) {
 		if b != "" {
@@ -50,15 +42,14 @@ func WithBinary(b string) Option {
 	}
 }
 
-// WithPassphrase sets the repository passphrase (already resolved from a
-// *_file/*_env ref by the caller). It is passed to borg via BORG_PASSPHRASE,
+// WithPassphrase sets the repository passphrase, passed via BORG_PASSPHRASE,
 // never on the command line.
 func WithPassphrase(p string) Option { return func(d *Driver) { d.passphrase = p } }
 
 // WithSSHKey sets the SSH private-key path for ssh:// repos (via BORG_RSH).
 func WithSSHKey(k string) Option { return func(d *Driver) { d.sshKey = k } }
 
-// WithRunner injects a Runner (tests). nil keeps the default exec runner.
+// WithRunner injects a Runner; nil keeps the default exec runner.
 func WithRunner(r Runner) Option {
 	return func(d *Driver) {
 		if r != nil {
@@ -67,7 +58,6 @@ func WithRunner(r Runner) Option {
 	}
 }
 
-// New returns a borg Driver for repo.
 func New(repo string, opts ...Option) *Driver {
 	d := &Driver{repo: repo, binary: "borg", run: execRunner}
 	for _, o := range opts {
@@ -82,8 +72,7 @@ func (d *Driver) Capabilities() driver.Capabilities {
 	return driver.Capabilities{NativeCheck: true, ListSnapshots: true, PartialRestore: true}
 }
 
-// env builds the borg environment: the inherited environment plus the secret
-// refs (appended last so they win). The passphrase value never appears on argv.
+// env returns the inherited environment plus secret refs; never appears on argv.
 func (d *Driver) env() []string {
 	env := os.Environ()
 	if d.passphrase != "" {
@@ -95,8 +84,6 @@ func (d *Driver) env() []string {
 	return env
 }
 
-// Validate confirms the repo is reachable and the passphrase/key work, via a
-// cheap read-only `borg list --short`.
 func (d *Driver) Validate(ctx context.Context) error {
 	_, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, []string{"list", "--short", d.repo})
 	if err != nil {
@@ -108,9 +95,8 @@ func (d *Driver) Validate(ctx context.Context) error {
 	return nil
 }
 
-// ListSnapshots returns the repo's archives, newest first. Borg timestamps are
-// naive local time (borg 1.x records no zone); they are read in the host's local
-// location, which is correct for the common single-timezone setup.
+// ListSnapshots returns the repo's archives, newest first. borg 1.x records no
+// zone, so timestamps are read as naive local time.
 func (d *Driver) ListSnapshots(ctx context.Context) ([]driver.Snapshot, error) {
 	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, []string{"list", "--json", d.repo})
 	if err != nil {
@@ -122,9 +108,8 @@ func (d *Driver) ListSnapshots(ctx context.Context) ([]driver.Snapshot, error) {
 	return parseList(stdout)
 }
 
-// NativeCheck delegates L1 integrity to `borg check`. Exit 0 is a clean repo;
-// exit 1 means borg found errors (the backup is corrupt — a failing Report);
-// exit ≥2 is operational (the auditor couldn't check — an error).
+// NativeCheck runs `borg check`. Exit 0 = clean; exit 1 = errors found (backup
+// corrupt, a failing Report); exit >=2 = operational (an error).
 func (d *Driver) NativeCheck(ctx context.Context, _ driver.NativeCheckOpts) (driver.Report, error) {
 	_, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, []string{"check", d.repo})
 	if err != nil {
@@ -140,8 +125,7 @@ func (d *Driver) NativeCheck(ctx context.Context, _ driver.NativeCheckOpts) (dri
 	}
 }
 
-// Restore extracts the selected archive (and optionally a subset of paths) into
-// targetDir. Read-only on the repo: `borg extract` only reads.
+// Restore extracts the selected archive (or a subset of paths) into targetDir.
 func (d *Driver) Restore(ctx context.Context, sel driver.Selection, targetDir string) (driver.RestoreReport, error) {
 	if len(sel.SnapshotIDs) == 0 {
 		return driver.RestoreReport{}, errors.New("borg restore: no archive selected")
@@ -161,8 +145,6 @@ func (d *Driver) Restore(ctx context.Context, sel driver.Selection, targetDir st
 	return dirReport(targetDir)
 }
 
-// ListFiles returns an archive's contents (one line of JSON per entry) for L2
-// sample selection.
 func (d *Driver) ListFiles(ctx context.Context, archive string) ([]driver.FileEntry, error) {
 	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, []string{"list", "--json-lines", d.repo + "::" + archive})
 	if err != nil {
@@ -174,8 +156,7 @@ func (d *Driver) ListFiles(ctx context.Context, archive string) ([]driver.FileEn
 	return parseFiles(stdout)
 }
 
-// ArchiveSize returns an archive's original (uncompressed) size via
-// `borg info --json`, for size-anomaly detection.
+// ArchiveSize returns an archive's original (uncompressed) size.
 func (d *Driver) ArchiveSize(ctx context.Context, id string) (int64, error) {
 	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, []string{"info", "--json", d.repo + "::" + id})
 	if err != nil {
@@ -186,8 +167,6 @@ func (d *Driver) ArchiveSize(ctx context.Context, id string) (int64, error) {
 	}
 	return parseArchiveSize(stdout)
 }
-
-// --- parsing (against real borg 1.4 --json output; see testdata) ---
 
 type listJSON struct {
 	Archives []struct {
@@ -209,7 +188,7 @@ func parseList(b []byte) ([]driver.Snapshot, error) {
 		}
 		snaps = append(snaps, driver.Snapshot{ID: a.Name, Time: t})
 	}
-	// Borg lists oldest→newest; return newest first for "pick newest".
+	// Borg lists oldest-first; reverse to newest-first.
 	for i, j := 0, len(snaps)-1; i < j; i, j = i+1, j-1 {
 		snaps[i], snaps[j] = snaps[j], snaps[i]
 	}
@@ -242,7 +221,6 @@ type fileLineJSON struct {
 	Mtime string `json:"mtime"`
 }
 
-// parseFiles parses `borg list --json-lines` output (one JSON object per line).
 func parseFiles(b []byte) ([]driver.FileEntry, error) {
 	var out []driver.FileEntry
 	for _, line := range bytes.Split(b, []byte("\n")) {
@@ -263,7 +241,7 @@ func parseFiles(b []byte) ([]driver.FileEntry, error) {
 	return out, nil
 }
 
-// borgTimeLayouts covers borg 1.x's naive ISO timestamps (microseconds, no zone).
+// borg 1.x ISO timestamps: naive, no zone.
 var borgTimeLayouts = []string{
 	"2006-01-02T15:04:05.000000",
 	"2006-01-02T15:04:05",
@@ -310,10 +288,8 @@ func dirReport(dir string) (driver.RestoreReport, error) {
 	return rep, nil
 }
 
-// execRunner runs the real borg binary. A non-zero exit returns (…, exitCode,
-// nil); only a failure to start (or a canceled context) returns a non-nil error.
 func execRunner(ctx context.Context, dir string, env []string, name string, args []string) ([]byte, []byte, int, error) {
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: name is the configured borg binary; args are read-only borg subcommands built here
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: argv is built here, not from user input
 	cmd.Dir = dir
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer

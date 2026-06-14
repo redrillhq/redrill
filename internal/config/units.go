@@ -9,11 +9,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Duration is a config duration accepting Go syntax (30m, 36h) plus a day
-// suffix (8d). Stored as time.Duration.
+// Duration accepts Go syntax (30m, 36h) plus a day suffix (8d).
 type Duration time.Duration
 
-// Duration returns the value as a time.Duration.
 func (d Duration) Duration() time.Duration { return time.Duration(d) }
 
 func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
@@ -52,11 +50,9 @@ func parseDuration(s string) (time.Duration, error) {
 	return v, nil
 }
 
-// Size is a byte quantity accepting IEC (1MiB, 50GiB), SI (40MB), or a bare
-// integer (bytes). Stored as int64 bytes.
+// Size accepts IEC (1MiB, 50GiB), SI (40MB), or a bare integer of bytes.
 type Size int64
 
-// Bytes returns the value in bytes.
 func (s Size) Bytes() int64 { return int64(s) }
 
 func (s *Size) UnmarshalYAML(n *yaml.Node) error {
@@ -80,7 +76,7 @@ func (s *Size) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-// Ordered longest-suffix-first so e.g. "GiB" matches before "B".
+// Longest suffix first so "GiB" matches before "B".
 var sizeUnits = []struct {
 	suffix string
 	mult   float64

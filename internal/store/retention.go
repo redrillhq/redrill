@@ -17,13 +17,10 @@ const (
 			SELECT id FROM runs WHERE drill = ? ORDER BY id DESC LIMIT ?))`
 )
 
-// Prune deletes a drill's runs that fall outside the retention window and
-// returns how many were removed. A run is pruned if it is older than maxAge OR
-// beyond the newest maxCount — both caps apply, bounding storage by age and by
-// count. A non-positive maxAge or maxCount disables that bound; with both
-// disabled Prune is a no-op. Cascading foreign keys remove the runs' steps,
-// evidence, and artifacts; drill_state is never touched (proof history is kept
-// forever, DESIGN §9.3).
+// Prune deletes a drill's runs older than maxAge OR beyond the newest maxCount,
+// returning how many were removed; a non-positive bound is disabled, both
+// disabled is a no-op. Cascading deletes remove the runs' steps/evidence/
+// artifacts; drill_state is never pruned (proof history kept forever).
 func (s *Store) Prune(ctx context.Context, drill string, maxAge time.Duration, maxCount int, now time.Time) (int64, error) {
 	ageOn := maxAge > 0
 	countOn := maxCount > 0

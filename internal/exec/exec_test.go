@@ -149,8 +149,7 @@ func TestDescribe(t *testing.T) {
 	}
 }
 
-// The seam's load-bearing invariant: StepSpec/StepResult must stay serializable
-// (no func fields, channels, or handles) so a Phase 4 agent can carry them.
+// StepSpec/StepResult must stay serializable: no func fields, channels, or handles.
 func TestStepSpecSerializable(t *testing.T) {
 	t.Parallel()
 	spec := dumpdirStep("/backups/pg", fullL1(), base)
@@ -189,15 +188,13 @@ func TestStepResultSerializable(t *testing.T) {
 	}
 }
 
-// fakeBorg stands in for the borg binary so the borg L1 glue is unit-testable
-// without a real engine. Subcommand → canned (stderr, exit).
 type fakeBorg struct {
 	validateExit  int    // borg list --short
 	listExit      int    // borg list --json
 	checkExit     int    // borg check
 	listJSON      string // borg list --json stdout
 	listFilesJSON string // borg list --json-lines stdout
-	checkStderr   string // borg check stderr (to test redaction)
+	checkStderr   string // borg check stderr
 }
 
 func (f fakeBorg) run(_ context.Context, _ string, _ []string, _ string, args []string) ([]byte, []byte, int, error) {
@@ -220,7 +217,7 @@ func (f fakeBorg) run(_ context.Context, _ string, _ []string, _ string, args []
 	case "info":
 		return []byte(`{"archives":[{"stats":{"original_size":1000}}]}`), nil, 0, nil
 	case "extract":
-		return nil, nil, 0, nil // a fake can't restore real files; L2 success is integration-tested
+		return nil, nil, 0, nil // can't restore real files; L2 success is integration-tested
 	}
 	return nil, nil, 0, nil
 }
@@ -239,7 +236,7 @@ func borgExecutor(f fakeBorg) *LocalExecutor {
 	return e
 }
 
-// borgListJSON renders archives oldest→newest (as borg does) with the given times.
+// borgListJSON renders archives oldest→newest, as borg does.
 func borgListJSON(times ...time.Time) string {
 	var b strings.Builder
 	b.WriteString(`{"archives":[`)
@@ -278,8 +275,7 @@ func TestRunBorgL1Pass(t *testing.T) {
 	}
 }
 
-// borg check exit 1 = errors found = the repo is corrupt → fail (the
-// truncated-segment behavior, unit side).
+// borg check exit 1 = errors found = corrupt repo → fail.
 func TestRunBorgL1NativeCheckFail(t *testing.T) {
 	t.Parallel()
 	f := fakeBorg{checkExit: 1, listJSON: borgListJSON(base.Add(-1 * time.Hour))}
@@ -304,7 +300,7 @@ func TestRunBorgL1StaleFail(t *testing.T) {
 	}
 }
 
-// An unreachable repo (validate fails) is error, never fail.
+// Unreachable repo is error, never fail.
 func TestRunBorgL1ValidateError(t *testing.T) {
 	t.Parallel()
 	f := fakeBorg{validateExit: 2}
@@ -317,7 +313,7 @@ func TestRunBorgL1ValidateError(t *testing.T) {
 func TestRunBorgL1ListErrorIsError(t *testing.T) {
 	t.Parallel()
 	sma := config.Duration(36 * time.Hour)
-	l1 := &config.L1{SnapshotMaxAge: &sma} // only the age check; no native check
+	l1 := &config.L1{SnapshotMaxAge: &sma} // age check only, no native check
 	f := fakeBorg{listExit: 2}
 	res, _ := borgExecutor(f).RunStep(context.Background(), borgStep(l1, base))
 	if res.Status != checks.Error {
@@ -325,8 +321,7 @@ func TestRunBorgL1ListErrorIsError(t *testing.T) {
 	}
 }
 
-// The redaction boundary (empty for dumpdir in M5) is real for borg: a secret
-// echoed in borg output must never reach evidence.
+// A secret echoed in borg output must never reach evidence.
 func TestRunBorgL1RedactsSecretInEvidence(t *testing.T) {
 	t.Parallel()
 	passFile := filepath.Join(t.TempDir(), "pass")
@@ -357,13 +352,12 @@ func evidenceByKind(res StepResult, kind string) checks.Evidence {
 	return checks.Evidence{}
 }
 
-// A restore that would blow the scratch quota is refused up front — an error
-// (the auditor declined), never a fail.
+// A restore that would blow the scratch quota is refused up front: error, never fail.
 func TestRunBorgL2ScratchQuotaError(t *testing.T) {
 	t.Parallel()
 	f := fakeBorg{
 		listJSON:      borgListJSON(base.Add(-1 * time.Hour)),
-		listFilesJSON: borgFilesJSON(50, 50, 50), // 150 bytes predicted
+		listFilesJSON: borgFilesJSON(50, 50, 50), // 150 bytes
 	}
 	l2 := &config.L2{Restore: config.Restore{Scope: "sample", Sample: &config.Sample{Files: 10}}}
 	step := StepSpec{
@@ -390,7 +384,7 @@ func dumpdirL2Step(dir string, cfgChecks []config.Check, scratchDir string, maxB
 	}
 }
 
-// dumpdir restores real files, so L2 success is unit-testable here.
+// dumpdir restores real files, so L2 success is unit-testable.
 func TestRunDumpdirL2Pass(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

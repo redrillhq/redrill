@@ -5,18 +5,13 @@ import (
 	"strings"
 )
 
-// L3 SQL check kinds (DESIGN §6, §7). They run psql inside the sandbox via
-// CheckEnv.Sandbox — there is no network to the container (network=none), so all
-// queries go through Exec.
-
+// Run via psql inside the sandbox.
 const (
 	kindSQL        = "sql"
 	kindSQLNoError = "sql_no_error"
 )
 
-// SQL runs a scalar query and evaluates the result against an expect predicate.
-// A query that errors is Error (the auditor couldn't get a value); a value that
-// fails the predicate is Fail; a value that won't coerce is Error.
+// A query error or uncoercible value is Error; a value failing the predicate is Fail.
 type SQL struct {
 	Query  string
 	Expect string
@@ -55,8 +50,7 @@ func (c SQL) Run(ctx context.Context, env CheckEnv) (Evidence, error) {
 	return ev, nil
 }
 
-// SQLNoError passes iff the query runs without error — an erroring query means
-// the restored data is bad (a missing table, a broken view), so it is Fail.
+// An erroring query means the data is bad, so Fail (not Error).
 type SQLNoError struct {
 	Query string
 	DB    string
@@ -79,8 +73,7 @@ func (c SQLNoError) Run(ctx context.Context, env CheckEnv) (Evidence, error) {
 	return ev, nil
 }
 
-// psqlCmd runs one query, tuples-only and unaligned (a bare scalar), stopping on
-// the first error so a failed query exits non-zero.
+// Tuples-only, unaligned, ON_ERROR_STOP so a failed query exits non-zero.
 func psqlCmd(db, query string) []string {
 	if db == "" {
 		db = "postgres"

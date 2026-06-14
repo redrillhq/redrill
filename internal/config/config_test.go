@@ -25,8 +25,6 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 }
 
-// Appendix A is the Phase 1 acceptance target; assert it parses into the
-// expected shape, not just that it is error-free.
 func TestAppendixAShape(t *testing.T) {
 	t.Parallel()
 	c, err := Load("testdata/appendix_a.yaml")
@@ -109,9 +107,9 @@ func TestParseErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		yaml string
-		want string // substring the (path-qualified) error must contain
+		want string // substring the error must contain
 	}{
-		// --- structural: strict parsing ---
+		// structural: strict parsing
 		{"unknown top key", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nbogus: 1\n", "bogus"},
 		{"unknown scratch key", "version: 1\ndata_dir: /v\nscratch: {dir: /s, nope: 1}\n", "nope"},
 		{"unknown source key", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r, nope: 1}]\n", "nope"},
@@ -126,7 +124,7 @@ func TestParseErrors(t *testing.T) {
 		{"check not a mapping", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l2: {checks: [\"foo\"]}}}]\n", "single-key"},
 		{"nested sql unknown key", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l3: {sandbox: {image: p}, checks: [{sql: {query: q, expect: e, foo: 1}}]}}}]\n", `unknown key "foo"`},
 
-		// --- semantic: validation ---
+		// semantic: validation
 		{"version missing", "data_dir: /v\nscratch: {dir: /s}\n", "version"},
 		{"version wrong", "version: 2\ndata_dir: /v\nscratch: {dir: /s}\n", "version"},
 		{"data_dir missing", "version: 1\nscratch: {dir: /s}\n", "data_dir"},

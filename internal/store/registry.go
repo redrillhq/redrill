@@ -11,8 +11,7 @@ import (
 // ErrNotFound is returned (wrapped) by Get* lookups when no row matches.
 var ErrNotFound = errors.New("not found")
 
-// UpsertSource inserts or updates a source by name. created_at is preserved on
-// update — only the first insert records it.
+// UpsertSource preserves created_at on update.
 func (s *Store) UpsertSource(ctx context.Context, src Source) error {
 	if src.Name == "" {
 		return fmt.Errorf("upsert source: name required")
@@ -31,7 +30,7 @@ func (s *Store) UpsertSource(ctx context.Context, src Source) error {
 	return nil
 }
 
-// GetSource returns the source named name, or a wrapped ErrNotFound.
+// GetSource returns wrapped ErrNotFound when absent.
 func (s *Store) GetSource(ctx context.Context, name string) (Source, error) {
 	var (
 		src     Source
@@ -50,7 +49,7 @@ func (s *Store) GetSource(ctx context.Context, name string) (Source, error) {
 	return src, nil
 }
 
-// ListSources returns all sources ordered by name.
+// ListSources is ordered by name.
 func (s *Store) ListSources(ctx context.Context) ([]Source, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT name, type, config_hash, created_at FROM sources ORDER BY name`)
@@ -77,7 +76,6 @@ func (s *Store) ListSources(ctx context.Context) ([]Source, error) {
 	return out, nil
 }
 
-// UpsertDrill inserts or updates a drill by name.
 func (s *Store) UpsertDrill(ctx context.Context, d Drill) error {
 	if d.Name == "" {
 		return fmt.Errorf("upsert drill: name required")
@@ -97,7 +95,7 @@ func (s *Store) UpsertDrill(ctx context.Context, d Drill) error {
 	return nil
 }
 
-// GetDrill returns the drill named name, or a wrapped ErrNotFound.
+// GetDrill returns wrapped ErrNotFound when absent.
 func (s *Store) GetDrill(ctx context.Context, name string) (Drill, error) {
 	var (
 		d           Drill
@@ -116,7 +114,7 @@ func (s *Store) GetDrill(ctx context.Context, name string) (Drill, error) {
 	return d, nil
 }
 
-// ListDrills returns all drills ordered by name.
+// ListDrills is ordered by name.
 func (s *Store) ListDrills(ctx context.Context) ([]Drill, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT name, source, config_hash, max_proof_age, levels_json FROM drills ORDER BY name`)

@@ -16,16 +16,15 @@ import (
 	"github.com/alyamovsky/redrill/internal/store"
 )
 
-// drillStatus is one drill's computed status for the status table.
 type drillStatus struct {
 	drill         string
 	source        string
 	last          *store.Run         // newest run, nil if none
 	proofs        []store.DrillState // last_proven per level
 	headlineLevel string             // highest configured level
-	headlineProof time.Time          // headline level's proof time (zero if none)
+	headlineProof time.Time
 	headlineOK    bool
-	nextRun       time.Time // next scheduled fire (zero if schedule unparseable)
+	nextRun       time.Time // zero if schedule unparseable
 	nextOK        bool
 	stale         bool
 }
@@ -75,8 +74,6 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// collectStatus assembles each configured drill's status from the store and its
-// schedule. Config is the source of truth for the drill set (DESIGN §4).
 func collectStatus(ctx context.Context, st *store.Store, cfg *config.Config, now time.Time) ([]drillStatus, error) {
 	out := make([]drillStatus, 0, len(cfg.Drills))
 	for i := range cfg.Drills {
@@ -155,8 +152,7 @@ func nextRunCell(d drillStatus, now time.Time) string {
 	return until(now, d.nextRun)
 }
 
-// statusJSON maps the internal status model to a clean JSON shape: optional
-// times are RFC3339 strings, omitted when absent.
+// Optional times are RFC3339, omitted when absent.
 func statusJSON(list []drillStatus) []map[string]any {
 	out := make([]map[string]any, 0, len(list))
 	for _, d := range list {
@@ -193,8 +189,7 @@ func statusJSON(list []drillStatus) []map[string]any {
 	return out
 }
 
-// ago renders how long before now t was, compactly ("3d ago", "<1m ago"). A zero
-// t reads as "never".
+// "3d ago"; a zero t reads as "never".
 func ago(now, t time.Time) string {
 	if t.IsZero() {
 		return "never"
@@ -202,8 +197,7 @@ func ago(now, t time.Time) string {
 	return humanDur(now.Sub(t)) + " ago"
 }
 
-// until renders how far ahead of now t is ("in 3d"). A zero or past t reads as
-// "now".
+// "in 3d"; a zero or past t reads as "now".
 func until(now, t time.Time) string {
 	d := t.Sub(now)
 	if d <= 0 {
@@ -212,7 +206,7 @@ func until(now, t time.Time) string {
 	return "in " + humanDur(d)
 }
 
-// humanDur renders a non-negative duration compactly at one unit of resolution.
+// One unit of resolution.
 func humanDur(d time.Duration) string {
 	if d < 0 {
 		d = -d

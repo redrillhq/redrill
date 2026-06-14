@@ -23,8 +23,7 @@ func TestStale(t *testing.T) {
 		{"never proven is stale", 10 * day, time.Time{}, true},
 		{"no SLA never stale", 0, time.Time{}, false},
 		{"negative SLA never stale", -1, now.Add(-100 * day), false},
-		// Downtime: the daemon was off for weeks, so no run advanced the proof;
-		// staleness must still fire purely from the stored timestamp vs now.
+		// Downtime: no run advanced the proof; staleness fires from the timestamp alone.
 		{"downtime past SLA", 7 * day, now.Add(-30 * day), true},
 	}
 	for _, tt := range tests {

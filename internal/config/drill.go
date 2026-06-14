@@ -1,27 +1,24 @@
 package config
 
-// Drill is a scheduled verification job against one source.
 type Drill struct {
 	Name        string   `yaml:"name"`
 	Source      string   `yaml:"source"`
-	Schedule    string   `yaml:"schedule"` // cron or human shorthand; grammar parsed in M9
+	Schedule    string   `yaml:"schedule"`
 	Jitter      Duration `yaml:"jitter"`
 	MaxProofAge Duration `yaml:"max_proof_age"`
 	Timeout     Duration `yaml:"timeout"`
 	Levels      Levels   `yaml:"levels"`
 }
 
-// Levels selects which depths a drill runs; at least one must be configured.
+// At least one level must be configured.
 type Levels struct {
 	L1 *L1 `yaml:"l1"`
 	L2 *L2 `yaml:"l2"`
 	L3 *L3 `yaml:"l3"`
 }
 
-// L1 is integrity. Archive sources (borg/restic) use native_check /
-// snapshot_max_age / size_anomaly_pct; dumpdir sources use file_min_bytes /
-// compression_test / max_age. Pointers distinguish unset from zero so a field
-// belonging to the wrong source type can be rejected.
+// L1 is integrity. Pointers distinguish unset from zero so a field belonging to
+// the wrong source type is rejected.
 type L1 struct {
 	NativeCheck    *bool     `yaml:"native_check"`
 	SnapshotMaxAge *Duration `yaml:"snapshot_max_age"`
@@ -32,20 +29,19 @@ type L1 struct {
 	MaxAge          *Duration `yaml:"max_age"`
 }
 
-// L2 is restorability: restore a sample (or full set) into scratch and assert.
+// L2 is restorability: restore a sample (or full set) into scratch, then assert.
 type L2 struct {
 	Restore Restore `yaml:"restore"`
 	Checks  []Check `yaml:"checks"`
 }
 
-// Restore describes what L2 pulls out of the source.
 type Restore struct {
 	Scope        string   `yaml:"scope"` // sample | full
 	Sample       *Sample  `yaml:"sample"`
 	IncludePaths []string `yaml:"include_paths"`
 }
 
-// Sample sizes a sampled restore: N random files plus M newest.
+// A sampled restore takes Files random files plus Newest newest.
 type Sample struct {
 	Files  int `yaml:"files"`
 	Newest int `yaml:"newest"`
@@ -53,13 +49,12 @@ type Sample struct {
 
 // L3 is usability: boot a sandbox from restored data and assert against it.
 type L3 struct {
-	ExtractPath string  `yaml:"extract_path"` // borg: dump to extract from inside the archive
+	ExtractPath string  `yaml:"extract_path"`
 	Sandbox     Sandbox `yaml:"sandbox"`
 	Load        string  `yaml:"load"` // auto | pg_restore | psql
 	Checks      []Check `yaml:"checks"`
 }
 
-// Sandbox is the ephemeral, network-isolated container L3 boots.
 type Sandbox struct {
 	Image   string            `yaml:"image"`
 	Env     map[string]string `yaml:"env"`
@@ -133,15 +128,13 @@ func (l *L3) validate(path, srcType string, es *errset) {
 	if l.Load != "" && l.Load != "auto" && l.Load != "pg_restore" && l.Load != "psql" {
 		es.add(path+".load", "must be auto, pg_restore, or psql, got %q", l.Load)
 	}
-	// borg archives hold a tree; L3 needs to know which dump to extract. dumpdir
-	// sources are already a single file, so extract_path is borg-only (and the
-	// executor refuses a borg L3 without it).
+	// borg archives hold a tree, so L3 needs to know which dump to extract; a
+	// dumpdir source is already a single file.
 	if srcType == "borg" && l.ExtractPath == "" {
 		es.add(path+".extract_path", "required for a borg L3 (the dump to extract from the archive)")
 	}
-	// An L3 with no checks would boot a sandbox, load the dump, and prove nothing
-	// — a load that merely ran is not a verdict (DESIGN §4, §6). Require a real
-	// assertion so a healthy-looking run can never be a silent pass.
+	// Without a check an L3 could boot, load, and silently pass while proving
+	// nothing.
 	if len(l.Checks) == 0 {
 		es.add(path+".checks", "at least one check is required (an L3 with no checks proves nothing)")
 	}

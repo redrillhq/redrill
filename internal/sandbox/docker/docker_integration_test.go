@@ -60,7 +60,7 @@ func TestIntegrationSandboxLifecycle(t *testing.T) {
 		t.Errorf("injected file = %q (%v)", cat.Stdout, err)
 	}
 
-	// A bad query exits non-zero (so the sql checks can tell pass from fail).
+	// A bad query must exit non-zero so sql checks can tell pass from fail.
 	bad, err := sb.Exec(ctx, []string{"psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-tAc", "select * from nope"})
 	if err != nil {
 		t.Fatalf("Exec(bad): %v", err)
@@ -100,9 +100,8 @@ func TestIntegrationJanitor(t *testing.T) {
 	}
 }
 
-// A container that exits during boot (postgres with no password / trust auth)
-// must fail readiness fast — Start returns promptly with a "container exited"
-// error instead of polling pg_isready until the context deadline.
+// A container that exits during boot must fail readiness fast — Start returns
+// promptly with a "container exited" error, not at the context deadline.
 func TestIntegrationReadyFailsFastOnExit(t *testing.T) {
 	rt := newRuntime(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -110,7 +109,7 @@ func TestIntegrationReadyFailsFastOnExit(t *testing.T) {
 
 	start := time.Now()
 	sb, err := rt.Start(ctx, sandbox.SandboxSpec{
-		Image:    "postgres:16", // no POSTGRES_PASSWORD/HOST_AUTH_METHOD → entrypoint exits non-zero
+		Image:    "postgres:16", // no POSTGRES_PASSWORD: entrypoint exits non-zero
 		Network:  "none",
 		Labels:   map[string]string{sandbox.RunLabel: "fail-fast"},
 		ReadyCmd: []string{"pg_isready", "-U", "postgres"},

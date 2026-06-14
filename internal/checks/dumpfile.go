@@ -13,18 +13,13 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// L1 dump-file check kinds (DESIGN §6, §7). Each inspects a single dump file in
-// place — no restore. A bad backup (too small, corrupt, stale) is Fail; an
-// unreadable file is Error (the auditor couldn't check), never conflated.
-
+// Inspected in place, no restore.
 const (
 	kindFileMinBytes    = "file_min_bytes"
 	kindCompressionTest = "compression_test"
 	kindMaxAge          = "max_age"
 )
 
-// FileMinBytes fails if the dump file is smaller than Min bytes (catching empty
-// or truncated dumps).
 type FileMinBytes struct {
 	Path string
 	Min  int64
@@ -47,9 +42,7 @@ func (c FileMinBytes) Run(_ context.Context, _ CheckEnv) (Evidence, error) {
 	return ev, nil
 }
 
-// CompressionTest decompresses the whole dump to verify integrity, choosing
-// gzip or zstd by extension (DESIGN §6). A decompression failure is Fail (the
-// dump is corrupt); an unreadable file or an unrecognized extension is Error.
+// Decompression failure is Fail; unreadable file or unknown extension is Error.
 type CompressionTest struct {
 	Path string
 }
@@ -80,9 +73,7 @@ func (c CompressionTest) Run(_ context.Context, _ CheckEnv) (Evidence, error) {
 	return ev, nil
 }
 
-// setCompressionResult maps the decompression outcome to a verdict, keeping
-// fail≠error: a stream that won't decompress is a corrupt dump (fail), but a
-// failure to read the bytes off disk is the auditor's problem (error).
+// Won't-decompress is fail; can't-read-disk is error.
 func setCompressionResult(ev *Evidence, err error, ioFailure bool) {
 	switch {
 	case err == nil:
@@ -94,9 +85,8 @@ func setCompressionResult(ev *Evidence, err error, ioFailure bool) {
 	}
 }
 
-// ioErrReader records the last underlying read error (other than EOF) so a
-// disk/transport failure can be told apart from a genuine decompression failure
-// on bytes that read fine.
+// Records the last underlying read error so a disk failure can be told apart
+// from a decompression failure on bytes that read fine.
 type ioErrReader struct {
 	r   io.Reader
 	err error
@@ -110,9 +100,7 @@ func (e *ioErrReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// testGzip decompresses the whole stream. It returns the decompression error (if
-// any) and whether that error came from the underlying reader (an I/O failure)
-// rather than the gzip data itself — so the caller can keep fail≠error.
+// The bool reports whether the error came from the underlying reader (I/O), not the data.
 func testGzip(r io.Reader) (error, bool) {
 	er := &ioErrReader{r: r}
 	zr, err := gzip.NewReader(er)
@@ -136,8 +124,6 @@ func testZstd(r io.Reader) (error, bool) {
 	return err, er.err != nil
 }
 
-// MaxAge fails if the dump file's mtime is older than Max (catching a stale
-// source whose cron stopped producing fresh dumps).
 type MaxAge struct {
 	Path string
 	Max  time.Duration

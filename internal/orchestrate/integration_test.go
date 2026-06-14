@@ -18,9 +18,7 @@ import (
 	"github.com/alyamovsky/redrill/internal/store"
 )
 
-// Full L1+L2 borg drill against a real repo built in test setup (TESTING.md),
-// plus the missing-data-dir sabotage fixture caught at L2. Skipped where borg is
-// absent; verified against real borg in a golang+borgbackup container.
+// Real-borg L1+L2 drills plus the missing-data-dir fixture; skipped where borg is absent.
 
 func requireBorg(t *testing.T) {
 	t.Helper()
@@ -54,7 +52,7 @@ func runBorgSetup(t *testing.T, dir string, env []string, args ...string) {
 }
 
 // buildBorgRepo creates a repo with a config/ tree and, unless omitData, a data/
-// tree — omitting it models the missing-data-dir failure (a bad exclude).
+// tree; omitting it models the missing-data-dir failure (a bad exclude).
 func buildBorgRepo(t *testing.T, omitData bool) (repo, passFile string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -117,8 +115,7 @@ func TestIntegrationBorgL1L2(t *testing.T) {
 	}
 }
 
-// missing-data-dir: the archive lacks the data/ directory. L2 path_exists must
-// catch it as fail.
+// missing-data-dir: archive lacks data/; L2 path_exists must catch it as fail.
 func TestIntegrationMissingDataDir(t *testing.T) {
 	requireBorg(t)
 	repo, passFile := buildBorgRepo(t, true)
@@ -140,7 +137,7 @@ func requireDocker(t *testing.T) *docker.Runtime {
 	return rt
 }
 
-// sqlDumpdir writes body as a gzipped plain-SQL "dump" in a fresh dumpdir.
+// sqlDumpdir writes body as a gzipped SQL dump in a fresh dumpdir.
 func sqlDumpdir(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -190,7 +187,7 @@ func TestIntegrationDumpdirL3(t *testing.T) {
 	}
 }
 
-// wrong-db-dump: the dump loads but the key table is empty → sql count fails.
+// wrong-db-dump: dump loads but the key table is empty, so sql count fails.
 func TestIntegrationWrongDBDump(t *testing.T) {
 	rt := requireDocker(t)
 	dir := sqlDumpdir(t, "CREATE TABLE users(id int);\n")

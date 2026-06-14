@@ -26,7 +26,7 @@ import (
 
 const defaultConfigPath = "/etc/redrill/config.yaml"
 
-// Set at build time via -ldflags (see Makefile).
+// Set at build time via -ldflags.
 var (
 	version = "dev"
 	commit  = "none"
@@ -121,9 +121,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := config.Load(*path)
 	if err == nil {
-		// The schedule grammar (cron + shorthand) lives in internal/scheduler, so
-		// config validation can't reach it (config is a leaf). cmd is the
-		// integration point: check schedules here so `validate` stays the contract.
+		// config is a leaf and can't reach the scheduler grammar, so check schedules here.
 		err = checkSchedules(cfg)
 	}
 	if err != nil {
@@ -146,8 +144,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// errorLines splits a (possibly joined) error into one message per line for
-// JSON output.
+// Splits a joined error into one message per line for JSON output.
 func errorLines(err error) []string {
 	lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
 	out := make([]string, 0, len(lines))
@@ -162,7 +159,7 @@ func errorLines(err error) []string {
 func writeJSON(w io.Writer, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false) // don't escape <, >, & — keep expect predicates ("> 0", "age < 8d") readable
+	enc.SetEscapeHTML(false) // keep expect predicates ("> 0", "age < 8d") readable
 	_ = enc.Encode(v)
 }
 
@@ -209,8 +206,8 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 
 	host, _ := os.Hostname()
 	executor := exec.NewLocal(host)
-	// Wire the L3 sandbox runtime if a container engine is reachable; without
-	// one, L3 degrades to skipped. The janitor reaps orphans from crashed runs.
+	// Wire the L3 sandbox if a container engine is reachable, else L3 skips.
+	// The janitor reaps orphans from crashed runs.
 	if rt, rerr := docker.NewRuntime(ctx); rerr == nil {
 		defer func() { _ = rt.Close() }()
 		_, _ = rt.Janitor(ctx)
@@ -235,8 +232,6 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	return resultExit(res.Status)
 }
 
-// findDrill resolves a drill by name and its source. Config validation
-// guarantees a drill's source exists, so a missing source means an unknown drill.
 func findDrill(cfg *config.Config, name string) (*config.Drill, *config.Source, bool) {
 	for i := range cfg.Drills {
 		if cfg.Drills[i].Name != name {
@@ -251,7 +246,6 @@ func findDrill(cfg *config.Config, name string) (*config.Drill, *config.Source, 
 	return nil, nil, false
 }
 
-// findSource resolves a source by name.
 func findSource(cfg *config.Config, name string) (*config.Source, bool) {
 	for i := range cfg.Sources {
 		if cfg.Sources[i].Name == name {
@@ -262,8 +256,7 @@ func findSource(cfg *config.Config, name string) (*config.Source, bool) {
 }
 
 // parseNameAndFlags parses a subcommand whose flags may sit on either side of a
-// required positional NAME (e.g. `history app-db -n 5` or `history -n 5 app-db`).
-// ok is false when no NAME was given.
+// required positional NAME. ok is false when no NAME was given.
 func parseNameAndFlags(fs *flag.FlagSet, args []string) (name string, ok bool, err error) {
 	if err := fs.Parse(args); err != nil {
 		return "", false, err
@@ -279,8 +272,6 @@ func parseNameAndFlags(fs *flag.FlagSet, args []string) (name string, ok bool, e
 	return rest[0], true, nil
 }
 
-// checkSchedules validates every drill's schedule string against the schedule
-// grammar (cron + human shorthand), returning a joined, path-qualified error.
 func checkSchedules(cfg *config.Config) error {
 	var errs []error
 	for i := range cfg.Drills {

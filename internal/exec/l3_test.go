@@ -12,8 +12,6 @@ import (
 	"github.com/alyamovsky/redrill/internal/sandbox"
 )
 
-// fakeSandbox routes container Exec calls to canned results so the L3 glue is
-// unit-testable without Docker.
 type fakeSandbox struct {
 	spec   sandbox.SandboxSpec
 	exec   func(cmd []string) sandbox.ExecResult
@@ -39,13 +37,12 @@ func (r *fakeRuntime) Start(_ context.Context, spec sandbox.SandboxSpec) (sandbo
 	return r.sb, nil
 }
 
-// pgRoute answers the load, the target-DB probe, and a scalar query.
 func pgRoute(sqlOut string, sqlExit int) func([]string) sandbox.ExecResult {
 	return func(cmd []string) sandbox.ExecResult {
 		j := strings.Join(cmd, " ")
 		switch {
 		case strings.Contains(j, "pg_database"):
-			return sandbox.ExecResult{ExitCode: 0} // no extra db -> "postgres"
+			return sandbox.ExecResult{ExitCode: 0} // no extra db → "postgres"
 		case strings.Contains(j, containerDumpPath):
 			return sandbox.ExecResult{ExitCode: 0} // load ok
 		default:
@@ -92,7 +89,7 @@ func TestRunDumpdirL3Pass(t *testing.T) {
 	}
 }
 
-// wrong-db-dump: the dump loads but the key table is empty → sql count fails.
+// Dump loads but the key table is empty → sql count fails.
 func TestRunDumpdirL3WrongDBFails(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -106,8 +103,7 @@ func TestRunDumpdirL3WrongDBFails(t *testing.T) {
 	}
 }
 
-// version-trap: a dump from a newer pg major is caught before the sandbox even
-// starts.
+// A dump from a newer pg major is caught before the sandbox starts.
 func TestRunDumpdirL3VersionTrap(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -127,8 +123,7 @@ func TestRunDumpdirL3VersionTrap(t *testing.T) {
 	}
 }
 
-// No sandbox runtime → L3 is skipped (the orchestrator's job), signaled by
-// ErrNoSandboxRuntime — never a silent pass.
+// No sandbox runtime → ErrNoSandboxRuntime (skipped), never a silent pass.
 func TestRunL3NoRuntimeSkips(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -141,15 +136,15 @@ func TestRunL3NoRuntimeSkips(t *testing.T) {
 	}
 }
 
-// A dump that decompresses past the scratch quota is refused as error (the
-// auditor declined), before the sandbox is ever started — never a silent fill.
+// A dump that decompresses past the quota is refused as error before the sandbox
+// starts, never a silent fill.
 func TestRunDumpdirL3QuotaExceeded(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	makeGz(t, dir, "app.sql.gz", strings.Repeat("SELECT 1;\n", 1000), base) // ~10 KB decompressed
+	makeGz(t, dir, "app.sql.gz", strings.Repeat("SELECT 1;\n", 1000), base) // ~10 KB
 	rt := &fakeRuntime{sb: &fakeSandbox{exec: pgRoute("42", 0)}}
 	step := dumpdirL3Step(dir, t.TempDir(), "postgres:16", []config.Check{sqlCheck("select count(*) from users", "> 0")})
-	step.Scratch.MaxBytes = config.Size(64) // smaller than the decompressed dump
+	step.Scratch.MaxBytes = config.Size(64) // smaller than the dump
 
 	res, err := NewLocal("h").WithSandbox(rt).RunStep(context.Background(), step)
 	if err != nil {
@@ -166,7 +161,6 @@ func TestRunDumpdirL3QuotaExceeded(t *testing.T) {
 	}
 }
 
-// dbSandbox answers any pg_database probe with a fixed database list.
 func dbSandbox(dbs ...string) *fakeSandbox {
 	out := strings.Join(dbs, "\n")
 	return &fakeSandbox{exec: func([]string) sandbox.ExecResult {
@@ -177,12 +171,11 @@ func dbSandbox(dbs ...string) *fakeSandbox {
 func TestLoadedDB(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	// The dump created its own database 'restored' (absent before the load).
+	// Dump created its own database 'restored' (absent before the load).
 	if db := loadedDB(ctx, dbSandbox("postgres", "restored"), map[string]bool{"postgres": true}); db != "restored" {
 		t.Errorf("loadedDB = %q, want restored (the dump's database)", db)
 	}
-	// POSTGRES_DB pre-created 'app'; the dump loaded into postgres and made no new
-	// db, so checks must target postgres — not the empty pre-created 'app'.
+	// POSTGRES_DB pre-created 'app' but the dump loaded into postgres: target postgres.
 	before := map[string]bool{"postgres": true, "app": true}
 	if db := loadedDB(ctx, dbSandbox("postgres", "app"), before); db != "postgres" {
 		t.Errorf("loadedDB = %q, want postgres (app pre-existed, not the dump's)", db)
@@ -199,7 +192,7 @@ func TestPgMajor(t *testing.T) {
 		"postgres:16":                           16,
 		"postgres:16.2":                         16,
 		"postgres:16-bookworm":                  16,
-		"registry.example.com:5000/postgres:16": 16, // registry port must not be read as the tag
+		"registry.example.com:5000/postgres:16": 16, // port not read as tag
 		"registry:5000/library/postgres:16":     16,
 		"postgres":                              0, // no tag
 		"postgres:latest":                       0, // non-numeric tag
@@ -219,7 +212,7 @@ func TestResolveLoader(t *testing.T) {
 		{"auto", "custom", "pg_restore"},
 		{"auto", "plain", "psql"},
 		{"", "custom", "pg_restore"},
-		{"pg_restore", "plain", "pg_restore"}, // explicit override wins over the detected format
+		{"pg_restore", "plain", "pg_restore"}, // explicit override wins
 		{"psql", "custom", "psql"},
 	}
 	for _, c := range cases {
@@ -229,8 +222,7 @@ func TestResolveLoader(t *testing.T) {
 	}
 }
 
-// The version-trap result (a borg L3 carries the passphrase in its redactor)
-// routes its evidence and summary through the redactor like every other path.
+// The version-trap result routes evidence and summary through the redactor.
 func TestVersionTrapResultRedacts(t *testing.T) {
 	t.Parallel()
 	red := redact.New()

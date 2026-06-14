@@ -39,9 +39,6 @@ func read(t *testing.T, name string) []byte {
 	return b
 }
 
-// The load-bearing invariant: the borg driver is read-only on the repository.
-// Exercise every method and assert each invocation uses an allow-listed
-// read-only subcommand — never create/prune/delete/compact/init/etc.
 func TestOnlyReadOnlyCommands(t *testing.T) {
 	t.Parallel()
 	f := newFake()
@@ -83,7 +80,7 @@ func TestParseListNewestFirst(t *testing.T) {
 	if snaps[0].ID != "arch-2" || snaps[1].ID != "arch-1" {
 		t.Errorf("order = %s,%s, want newest-first arch-2,arch-1", snaps[0].ID, snaps[1].ID)
 	}
-	// Time is parsed in local time, so the wall clock matches the string regardless of TZ.
+	// Parsed in local time: wall clock matches the string regardless of TZ.
 	got := snaps[0].Time
 	if got.Hour() != 18 || got.Minute() != 20 || got.Second() != 51 {
 		t.Errorf("arch-2 time = %v, want 18:20:51 wall clock", got)
@@ -125,9 +122,8 @@ func TestParseArchiveSize(t *testing.T) {
 	}
 }
 
-// borg check: exit 0 clean, exit 1 errors-found (fail, not Go error), exit ≥2
-// operational (Go error). This is what makes the truncated-segment fixture a
-// fail, not an error.
+// borg check: exit 0 clean, exit 1 errors-found (fail, not Go error), exit >=2
+// operational (Go error).
 func TestNativeCheckExitMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

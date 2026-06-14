@@ -8,10 +8,9 @@ import (
 	"time"
 )
 
-// RecordProof advances last_proven_at for one (drill, level). The orchestrator
-// calls this only on a full pass (DESIGN §6) — the store records the proof; the
-// "only on pass" policy lives in the caller. Per-level: proving L1 never touches
-// L2's proof.
+// RecordProof advances last_proven_at for one (drill, level). The "only on pass"
+// policy lives in the caller; this just records. Per-level: proving L1 never
+// touches L2's proof.
 func (s *Store) RecordProof(ctx context.Context, drill, level string, at time.Time) error {
 	if drill == "" || level == "" {
 		return fmt.Errorf("record proof: drill and level required")
@@ -30,8 +29,7 @@ func (s *Store) RecordProof(ctx context.Context, drill, level string, at time.Ti
 	return nil
 }
 
-// GetProof returns the last proven time for a (drill, level) and whether a proof
-// exists. A drill/level never proven returns ok=false, not an error.
+// GetProof returns ok=false (not an error) when the level was never proven.
 func (s *Store) GetProof(ctx context.Context, drill, level string) (time.Time, bool, error) {
 	var n int64
 	err := s.db.QueryRowContext(ctx,
@@ -45,7 +43,7 @@ func (s *Store) GetProof(ctx context.Context, drill, level string) (time.Time, b
 	return timeFromUnixNano(n), true, nil
 }
 
-// ListProofs returns a drill's proven levels ordered by level.
+// ListProofs is ordered by level.
 func (s *Store) ListProofs(ctx context.Context, drill string) ([]DrillState, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT drill, level, last_proven_at FROM drill_state WHERE drill = ? ORDER BY level`, drill)

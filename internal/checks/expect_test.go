@@ -127,8 +127,7 @@ func TestEvaluate(t *testing.T) {
 	}
 }
 
-// SQL scalars arrive in several timestamp shapes; age comparisons must coerce
-// each (the exact postgres wire format is pinned in M8).
+// SQL scalars arrive in several timestamp shapes; age comparisons must coerce each.
 func TestEvaluateTimeLayouts(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)

@@ -40,8 +40,7 @@ func TestPruneByCount(t *testing.T) {
 	for i := range 5 {
 		ids = append(ids, mustRun(ctx, t, s, "d", epoch.Add(time.Duration(i)*time.Hour)))
 	}
-	// A second drill must be untouched by pruning "d".
-	keepOther := mustRun(ctx, t, s, "other", epoch)
+	keepOther := mustRun(ctx, t, s, "other", epoch) // must survive pruning "d"
 
 	n, err := s.Prune(ctx, "d", 0, 2, epoch)
 	if err != nil {
@@ -69,7 +68,7 @@ func TestPruneByAge(t *testing.T) {
 	keep2 := mustRun(ctx, t, s, "d", epoch.Add(9*day))
 
 	now := epoch.Add(10 * day)
-	// maxAge 7d → cutoff = now-7d = epoch+3d; runs before that are pruned.
+	// maxAge 7d → cutoff epoch+3d; earlier runs pruned.
 	n, err := s.Prune(ctx, "d", 7*day, 0, now)
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
@@ -82,8 +81,6 @@ func TestPruneByAge(t *testing.T) {
 	}
 }
 
-// Both caps apply: a run is pruned if older than maxAge OR beyond the newest
-// maxCount.
 func TestPruneByAgeAndCount(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -94,9 +91,7 @@ func TestPruneByAgeAndCount(t *testing.T) {
 		ids = append(ids, mustRun(ctx, t, s, "d", epoch.Add(time.Duration(i)*day)))
 	}
 	now := epoch.Add(5 * day)
-	// maxAge 2d → cutoff day3 deletes days 0,1,2 (ids 0,1,2).
-	// maxCount 2 → keep days 4,5 (ids 4,5); count alone would also drop id3.
-	// Union deletes ids 0,1,2,3; remaining: ids 4,5.
+	// age cutoff day3 drops 0,1,2; count keeps 4,5; union drops 0,1,2,3.
 	n, err := s.Prune(ctx, "d", 2*day, 2, now)
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
@@ -127,7 +122,7 @@ func TestPruneCascadesAndKeepsProof(t *testing.T) {
 	if err := s.RecordProof(ctx, "d", "l1", epoch); err != nil {
 		t.Fatal(err)
 	}
-	mustRun(ctx, t, s, "d", epoch.Add(time.Hour)) // newer run to keep
+	mustRun(ctx, t, s, "d", epoch.Add(time.Hour)) // newer, kept
 
 	if _, err := s.Prune(ctx, "d", 0, 1, epoch); err != nil {
 		t.Fatalf("Prune: %v", err)
@@ -136,7 +131,6 @@ func TestPruneCascadesAndKeepsProof(t *testing.T) {
 	if _, err := s.GetRun(ctx, old); !errors.Is(err, ErrNotFound) {
 		t.Errorf("old run still present: %v", err)
 	}
-	// Orphaned children would still match run_id=old if the cascade failed.
 	if steps, _ := s.ListSteps(ctx, old); len(steps) != 0 {
 		t.Errorf("steps not cascaded: %d remain", len(steps))
 	}
@@ -146,7 +140,7 @@ func TestPruneCascadesAndKeepsProof(t *testing.T) {
 	if arts, _ := s.ListArtifacts(ctx, old); len(arts) != 0 {
 		t.Errorf("artifacts not cascaded: %d remain", len(arts))
 	}
-	// drill_state is kept forever, never pruned.
+	// drill_state is never pruned.
 	if _, ok, _ := s.GetProof(ctx, "d", "l1"); !ok {
 		t.Error("proof was pruned; drill_state must be kept forever")
 	}

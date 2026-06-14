@@ -46,8 +46,6 @@ func TestRedactInsideJSONAndQuotes(t *testing.T) {
 	}
 }
 
-// A short secret that is a substring of a longer one must not pre-empt the
-// longer match (longest-first ordering).
 func TestRedactLongestFirst(t *testing.T) {
 	t.Parallel()
 	r := New("abc", "abcdef")
@@ -68,7 +66,7 @@ func TestRedactEmptySecretIgnored(t *testing.T) {
 
 func TestRedactNoSecrets(t *testing.T) {
 	t.Parallel()
-	var r Redactor // zero value
+	var r Redactor
 	const text = "plain output"
 	if out := r.Redact(text); out != text {
 		t.Errorf("zero-value Redactor changed output: %q", out)
@@ -117,7 +115,6 @@ func TestAddEnvScrubsSecretNamesOnly(t *testing.T) {
 	}
 }
 
-// Redactor is documented safe for concurrent use; -race guards this.
 func TestRedactConcurrent(t *testing.T) {
 	t.Parallel()
 	r := New("hunter2")

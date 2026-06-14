@@ -17,7 +17,7 @@ func sampleFiles() []driver.FileEntry {
 		{Path: "data/b.txt", Size: 200, Mtime: at(3), IsFile: true},
 		{Path: "data/c.txt", Size: 300, Mtime: at(1), IsFile: true},
 		{Path: "data/d.txt", Size: 400, Mtime: at(2), IsFile: true},
-		{Path: "data", Size: 0, Mtime: at(0), IsFile: false}, // a directory — never selected
+		{Path: "data", Size: 0, Mtime: at(0), IsFile: false}, // directory, never selected
 	}
 }
 
@@ -45,7 +45,6 @@ func TestSelectSampleDeterministicAndShaped(t *testing.T) {
 		t.Errorf("paths not sorted: %v", p1)
 	}
 
-	// total must equal the sum of the selected files' sizes.
 	sz := map[string]int64{}
 	for _, f := range files {
 		sz[f.Path] = f.Size
@@ -61,7 +60,7 @@ func TestSelectSampleDeterministicAndShaped(t *testing.T) {
 
 func TestSelectSampleIncludeOnly(t *testing.T) {
 	t.Parallel()
-	// No sample config → only include_paths are restored.
+	// No sample config → only include_paths restored.
 	paths, total := selectSample(sampleFiles(), nil, []string{"config/"}, 1)
 	if !slices.Equal(paths, []string{"config/config.php"}) || total != 10 {
 		t.Errorf("got %v / %d, want [config/config.php] / 10", paths, total)

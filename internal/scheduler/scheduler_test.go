@@ -49,7 +49,7 @@ func TestDue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Scheduler{rng: func() float64 { return 0 }} // no jitter
+	s := &Scheduler{rng: func() float64 { return 0 }}
 	jDue := &job{drill: config.Drill{Name: "due"}, schedule: daily, base: now.Add(-time.Hour), fire: now.Add(-time.Hour)}
 	jFuture := &job{drill: config.Drill{Name: "future"}, schedule: daily, base: now.Add(time.Hour), fire: now.Add(time.Hour)}
 	s.jobs = []*job{jDue, jFuture}
@@ -61,7 +61,7 @@ func TestDue(t *testing.T) {
 	if !jDue.fire.After(now) {
 		t.Errorf("due job not advanced past now: fire=%v", jDue.fire)
 	}
-	// jDue's next slot is tomorrow midnight (12h away); the future job (1h) is sooner.
+	// jDue's next slot is 12h away; the future job (1h) is sooner.
 	if !next.Equal(jFuture.fire) {
 		t.Errorf("soonest next = %v, want the future job at %v", next, jFuture.fire)
 	}
@@ -91,7 +91,7 @@ func TestDispatchSingleFlight(t *testing.T) {
 	ctx := context.Background()
 
 	s.dispatch(ctx, &job{drill: config.Drill{Name: "a"}})
-	<-started // "a" holds the only slot
+	<-started // a holds the only slot
 	s.dispatch(ctx, &job{drill: config.Drill{Name: "b"}})
 	if got := runs.Load(); got != 1 {
 		t.Fatalf("runs = %d with one in flight; B must be skipped (single-flight)", got)
@@ -107,7 +107,7 @@ func TestDispatchTimeout(t *testing.T) {
 	t.Parallel()
 	done := make(chan error, 1)
 	run := func(ctx context.Context, _ config.Drill) error {
-		<-ctx.Done() // a real run would observe cancellation and stop
+		<-ctx.Done()
 		done <- ctx.Err()
 		return ctx.Err()
 	}
@@ -141,7 +141,7 @@ func TestRunDispatchesThenStops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Force the job due so the first loop tick fires it (real schedule is days away).
+	// Force the job due so the first loop tick fires it.
 	s.jobs[0].base = s.clock.Now().Add(-time.Minute)
 	s.jobs[0].fire = s.jobs[0].base
 

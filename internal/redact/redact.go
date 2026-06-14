@@ -7,26 +7,21 @@ import (
 	"sync"
 )
 
-// Placeholder replaces every redacted secret in captured output.
 const Placeholder = "[REDACTED]"
 
-// secretEnvName matches environment-variable names whose values are secrets and
-// must be scrubbed from captured output (DESIGN §9.7, "*_PASSWORD-style env").
-// Distinctive tokens match as substrings (catching PGPASSWORD); KEY only matches
-// at a separator boundary so MONKEY_MODE / KEYBOARD are left alone.
+// secretEnvName matches env-var names whose values are secrets. Distinctive
+// tokens match as substrings (catching PGPASSWORD); KEY only matches at a
+// separator boundary so MONKEY_MODE / KEYBOARD are left alone.
 var secretEnvName = regexp.MustCompile(`(?i)(PASSWORD|PASSWD|PASSPHRASE|SECRET|TOKEN|CREDENTIALS?|API_?KEY|(^|[_-])KEY([_-]|$))`)
 
-// Redactor scrubs registered secret values from any captured output before it
-// becomes evidence or logs — the mandatory boundary of DESIGN §9.7. Safe
-// for concurrent use. The zero value is usable and redacts nothing until
+// Safe for concurrent use; the zero value is usable and redacts nothing until
 // secrets are registered.
 type Redactor struct {
 	mu       sync.Mutex
 	secrets  map[string]struct{}
-	replacer *strings.Replacer // cached; nil when stale or empty
+	replacer *strings.Replacer // nil when stale or empty
 }
 
-// New returns a Redactor seeded with the given literal secret values.
 func New(secrets ...string) *Redactor {
 	r := &Redactor{}
 	for _, s := range secrets {
@@ -50,19 +45,17 @@ func (r *Redactor) AddSecret(value string) {
 		return
 	}
 	r.secrets[value] = struct{}{}
-	r.replacer = nil // rebuilt lazily on next Redact
+	r.replacer = nil
 }
 
-// AddEnv registers value as a secret iff name looks secret-bearing
-// (*_PASSWORD-style). Non-secret vars are left alone so useful diagnostics
-// (PATH, PGHOST, …) survive in evidence.
+// AddEnv registers value as a secret iff name looks secret-bearing. Non-secret
+// vars are left alone so useful diagnostics (PATH, PGHOST, …) survive.
 func (r *Redactor) AddEnv(name, value string) {
 	if secretEnvName.MatchString(name) {
 		r.AddSecret(value)
 	}
 }
 
-// Redact returns s with every registered secret value replaced by Placeholder.
 func (r *Redactor) Redact(s string) string {
 	r.mu.Lock()
 	rep := r.replacerLocked()
@@ -73,14 +66,13 @@ func (r *Redactor) Redact(s string) string {
 	return rep.Replace(s)
 }
 
-// RedactBytes is Redact for byte slices.
 func (r *Redactor) RedactBytes(b []byte) []byte {
 	return []byte(r.Redact(string(b)))
 }
 
-// replacerLocked returns a Replacer for the current secret set, building it if
-// stale. Secrets are ordered longest-first so a shorter secret that is a
-// substring of a longer one can't pre-empt the longer match. Caller holds r.mu.
+// replacerLocked builds (if stale) and returns the Replacer. Secrets are
+// ordered longest-first so a shorter secret that is a substring of a longer one
+// can't pre-empt it. Caller holds r.mu.
 func (r *Redactor) replacerLocked() *strings.Replacer {
 	if r.replacer != nil || len(r.secrets) == 0 {
 		return r.replacer

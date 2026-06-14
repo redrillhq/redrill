@@ -6,17 +6,11 @@ import (
 	"time"
 )
 
-// L1 archive (borg/restic) check kinds (DESIGN §6, §7). native_check is engine
-// delegation built by the executor from the driver's Report; these two are pure
-// predicates the executor feeds with data pulled from the engine.
-
 const (
 	kindSnapshotMaxAge = "snapshot_max_age"
 	kindSizeAnomaly    = "size_anomaly"
 )
 
-// SnapshotMaxAge fails if the newest snapshot is older than Max — a stale source
-// whose backups stopped advancing.
 type SnapshotMaxAge struct {
 	Newest time.Time
 	Max    time.Duration
@@ -40,10 +34,7 @@ func (c SnapshotMaxAge) Run(_ context.Context, env CheckEnv) (Evidence, error) {
 	return ev, nil
 }
 
-// SizeAnomaly is advisory (DESIGN §6: "→ warn"): it always passes, but flags
-// when the latest snapshot is more than Pct% below the trailing average — a
-// possible sign of silent data loss. No trailing history, or a zero average,
-// yields no signal.
+// Advisory: always passes, only flags in Actual.
 type SizeAnomaly struct {
 	LatestSize    int64
 	TrailingSizes []int64

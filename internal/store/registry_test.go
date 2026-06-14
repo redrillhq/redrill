@@ -37,8 +37,7 @@ func TestUpsertSourcePreservesCreatedAt(t *testing.T) {
 	if err := s.UpsertSource(ctx, Source{Name: "s", Type: "borg", ConfigHash: "h1", CreatedAt: epoch}); err != nil {
 		t.Fatal(err)
 	}
-	// Re-upsert with a later created_at and changed fields: type/hash update,
-	// created_at stays at the original.
+	// Re-upsert with a later created_at: type/hash update, created_at preserved.
 	later := epoch.Add(24 * time.Hour)
 	if err := s.UpsertSource(ctx, Source{Name: "s", Type: "restic", ConfigHash: "h2", CreatedAt: later}); err != nil {
 		t.Fatal(err)

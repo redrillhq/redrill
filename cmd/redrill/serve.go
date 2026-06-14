@@ -21,8 +21,6 @@ import (
 	"github.com/alyamovsky/redrill/internal/store"
 )
 
-// runServe loads and validates the config, then hands off to serve under a
-// context canceled by SIGINT/SIGTERM. No HTTP yet (Phase 2).
 func runServe(args []string, _, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -43,23 +41,20 @@ func runServe(args []string, _, stderr io.Writer) int {
 		return 3
 	}
 
-	// Cancel the daemon context on the first interrupt/terminate signal; a second
-	// signal falls through to the default handler for a hard exit.
+	// First signal cancels ctx; a second falls through to the default handler for a hard exit.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return serve(ctx, cfg, newLogger(stderr))
 }
 
-// serve runs the scheduler loop until ctx is canceled. It is the testable core
-// of runServe (no signal wiring), returning a process exit code.
+// The testable core of runServe; runs the scheduler loop until ctx is canceled.
 func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		log.Error("cannot create data_dir", "dir", cfg.DataDir, "error", err.Error())
 		return 2
 	}
-	// Startup (store, container runtime) runs under a background context: a
-	// shutdown signal arriving mid-boot must not abort a half-built daemon. Only
-	// the scheduler loop below — and the runs it drives — honor ctx cancellation.
+	// Startup uses a background context so a shutdown mid-boot can't abort a
+	// half-built daemon; only the scheduler loop below honors ctx cancellation.
 	startCtx := context.Background()
 	st, err := store.Open(startCtx, filepath.Join(cfg.DataDir, "redrill.db"))
 	if err != nil {
@@ -103,16 +98,14 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 	return 0
 }
 
-// executorBundle keeps the sandbox runtime handle alongside the executor so
-// serve can close it on shutdown.
+// executorBundle keeps the sandbox handle alongside the executor so serve can close it.
 type executorBundle struct {
 	local   *exec.LocalExecutor
 	sandbox *docker.Runtime
 }
 
-// buildExecutor wires a LocalExecutor with the Docker sandbox runtime when a
-// container engine is reachable; without one, L3 degrades to skipped. The
-// startup janitor reaps containers left by crashed runs (DESIGN §9.5).
+// buildExecutor wires the Docker sandbox when a container engine is reachable,
+// else L3 skips; the janitor reaps containers left by crashed runs.
 func buildExecutor(ctx context.Context, log *slog.Logger) executorBundle {
 	host, _ := os.Hostname()
 	local := exec.NewLocal(host)
@@ -130,8 +123,7 @@ func buildExecutor(ctx context.Context, log *slog.Logger) executorBundle {
 	return executorBundle{local: local, sandbox: rt}
 }
 
-// newLogger builds the slog logger: human text on a TTY, JSON otherwise
-// (DEVELOPMENT.md logging convention).
+// Human text on a TTY, JSON otherwise.
 func newLogger(w io.Writer) *slog.Logger {
 	if f, ok := w.(*os.File); ok && isTTY(f) {
 		return slog.New(slog.NewTextHandler(w, nil))

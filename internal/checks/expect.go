@@ -9,10 +9,7 @@ import (
 	"time"
 )
 
-// ErrCoercion marks an expect evaluation that failed because the actual value
-// could not be coerced to the type the operator needs (e.g. "abc" for `> 0`, or
-// a non-timestamp for `age < 8d`). The caller maps it to check Error, never Fail
-// (DESIGN §9.8).
+// The caller maps this to Error, not Fail.
 var ErrCoercion = errors.New("cannot coerce actual value")
 
 type expectOp int
@@ -29,10 +26,7 @@ const (
 	opNonempty
 )
 
-// Expectation is a parsed `expect` predicate (DESIGN §7 grammar): `> N`, `>= N`,
-// `== N`, `!= N`, `between A B`, `age < DUR`, `age > DUR`, `matches REGEX`,
-// `nonempty`. Build one with ParseExpect. Numeric comparisons are exact;
-// `between` is inclusive; `nonempty` treats whitespace-only as empty.
+// Build with ParseExpect. between is inclusive; nonempty treats whitespace-only as empty.
 type Expectation struct {
 	op  expectOp
 	raw string
@@ -42,13 +36,10 @@ type Expectation struct {
 	re  *regexp.Regexp // operand for matches
 }
 
-// String returns the original predicate text (used as Evidence "expected").
 func (e Expectation) String() string { return e.raw }
 
-// ParseExpect strictly parses an expect predicate. A malformed predicate
-// (unknown operator, missing/extra operand, bad number/duration/regex) is a
-// returned error: operand *types* are validated here, at parse time. Only
-// coercion of the actual value can fail later, in Evaluate.
+// Operand types are validated here; only coercion of the actual value can fail
+// later, in Evaluate.
 func ParseExpect(s string) (Expectation, error) {
 	raw := strings.TrimSpace(s)
 	if raw == "" {
@@ -126,10 +117,7 @@ func ParseExpect(s string) (Expectation, error) {
 	return e, nil
 }
 
-// Evaluate reports whether actual satisfies the expectation, coercing actual as
-// the operator requires. now anchors `age` comparisons. A coercion failure
-// returns a non-nil error wrapping ErrCoercion (the caller maps it to Error);
-// otherwise it returns (satisfied, nil) (true→Pass, false→Fail).
+// now anchors age comparisons. A coercion failure wraps ErrCoercion.
 func (e Expectation) Evaluate(actual string, now time.Time) (bool, error) {
 	switch e.op {
 	case opNonempty:
@@ -191,8 +179,7 @@ func toNumber(s string) (float64, error) {
 	return n, nil
 }
 
-// timeLayouts covers the timestamp shapes SQL scalars commonly arrive in. The
-// exact postgres wire format is pinned against a real engine in M8.
+// Timestamp shapes SQL scalars commonly arrive in.
 var timeLayouts = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
@@ -213,9 +200,7 @@ func toTime(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("%w: %q is not a timestamp", ErrCoercion, s)
 }
 
-// parseDuration accepts Go durations (30m, 36h) plus a day suffix (8d), matching
-// the config grammar (DESIGN §7). Kept local so internal/checks imports no other
-// internal package (ARCHITECTURE import rules).
+// Go durations plus a day suffix (8d).
 func parseDuration(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	if rest, ok := strings.CutSuffix(s, "d"); ok {

@@ -46,7 +46,6 @@ func TestRunLifecycle(t *testing.T) {
 	if !got.FinishedAt.Equal(fin) || got.FinishedAt.Location() != time.UTC {
 		t.Errorf("finished_at = %v, want %v UTC", got.FinishedAt, fin)
 	}
-	// Identity fields set at create survive FinishRun.
 	if got.Executor != "local" || got.Trigger != TriggerSchedule {
 		t.Errorf("FinishRun clobbered identity fields: %+v", got)
 	}
@@ -75,8 +74,7 @@ func TestCreateRunValidation(t *testing.T) {
 	}
 }
 
-// A bad verdict must never reach the store: the runs.result CHECK enforces the
-// pass|fail|error taxonomy (DESIGN §9.8) at the storage boundary.
+// The runs.result CHECK rejects a bad verdict at the storage boundary.
 func TestFinishRunRejectsBadResult(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -122,7 +120,6 @@ func TestListRunsNewestFirstAndLimit(t *testing.T) {
 		}
 		ids = append(ids, id)
 	}
-	// A run for a different drill must not appear.
 	if _, err := s.CreateRun(ctx, Run{Drill: "other", Trigger: TriggerManual, StartedAt: epoch}); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +165,7 @@ func TestFilesRestoredAndLastRunWithResult(t *testing.T) {
 		t.Errorf("files_restored = %d, want 120", got.FilesRestored)
 	}
 
-	// The baseline is the most recent *passed* run, not the later fail.
+	// Most recent passed run, not the later fail.
 	last, ok, err := s.LastRunWithResult(ctx, "d", ResultPass)
 	if err != nil || !ok {
 		t.Fatalf("LastRunWithResult: %v ok=%v", err, ok)
@@ -243,7 +240,7 @@ func TestStepsEvidenceArtifacts(t *testing.T) {
 	}
 }
 
-// Children reference runs(id) by foreign key — proof that foreign_keys is ON.
+// Proves foreign_keys is ON: a step for an unknown run is rejected.
 func TestAddStepUnknownRunFails(t *testing.T) {
 	t.Parallel()
 	s := newStore(t)

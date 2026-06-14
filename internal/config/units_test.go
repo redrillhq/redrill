@@ -100,7 +100,6 @@ func TestSizeUnmarshalYAML(t *testing.T) {
 	if s.Bytes() != 50<<30 {
 		t.Errorf("got %d, want %d", s.Bytes(), int64(50)<<30)
 	}
-	// bare integer is bytes
 	if err := yaml.Unmarshal([]byte("4096"), &s); err != nil {
 		t.Fatalf("unmarshal int: %v", err)
 	}

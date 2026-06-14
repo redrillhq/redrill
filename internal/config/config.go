@@ -10,8 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the whole redrill configuration (DESIGN §7). Load it with Load or
-// Parse; both return a fully validated Config or a config error.
 type Config struct {
 	Version        int      `yaml:"version"`
 	DataDir        string   `yaml:"data_dir"`
@@ -25,25 +23,21 @@ type Config struct {
 	Drills         []Drill  `yaml:"drills"`
 }
 
-// Scratch is the quota-managed temp space restores land in.
 type Scratch struct {
 	Dir      string `yaml:"dir"`
 	MaxBytes Size   `yaml:"max_bytes"`
 }
 
-// Nice tunes the scheduling priority applied to spawned engine processes.
 type Nice struct {
 	CPU     int    `yaml:"cpu"`
 	IOClass string `yaml:"io_class"` // idle | best-effort | none
 }
 
-// Server holds the (Phase 2) HTTP listener configuration.
 type Server struct {
 	Listen        string `yaml:"listen"`
 	BasicAuthFile string `yaml:"basic_auth_file"`
 }
 
-// Notify routes events to shoutrrr URLs.
 type Notify struct {
 	URLs            []string `yaml:"urls"`
 	Events          []string `yaml:"events"`
@@ -56,7 +50,6 @@ var notifyEvents = map[string]bool{
 
 var ioClasses = map[string]bool{"idle": true, "best-effort": true, "none": true}
 
-// Load reads, parses, and validates the config at path.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: config path is operator-supplied via -c, by design
 	if err != nil {
@@ -65,7 +58,7 @@ func Load(path string) (*Config, error) {
 	return Parse(data)
 }
 
-// Parse parses and validates config bytes. Unknown keys are errors.
+// Parse validates config bytes; unknown keys are errors.
 func Parse(data []byte) (*Config, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -101,8 +94,8 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-// Validate checks semantic and cross-field rules. Structural strictness
-// (unknown keys, bad durations/sizes) is enforced earlier, during parsing.
+// Validate checks semantic and cross-field rules; structural strictness is
+// enforced earlier, during parsing.
 func (c *Config) Validate() error {
 	var es errset
 	if c.Version != 1 {
@@ -167,7 +160,6 @@ func (c *Config) Validate() error {
 	return es.err()
 }
 
-// ValidationError is one semantic problem, qualified by its path in the config.
 type ValidationError struct {
 	Path string
 	Msg  string

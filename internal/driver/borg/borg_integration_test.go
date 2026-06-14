@@ -15,11 +15,8 @@ import (
 	"github.com/alyamovsky/redrill/internal/driver"
 )
 
-// Real-engine tests against borg 1.x (TESTING.md): the driver is exercised
-// against a repository built in test setup, and the borg sabotage fixtures —
-// truncated-segment and stale-source — are proven caught. Building the fixture
-// repo writes (borg init/create), which is test-setup's job; the driver under
-// test only ever reads. Skipped where borg is not installed.
+// Real-engine tests against borg 1.x. Test setup writes the fixture repo (borg
+// init/create); the driver under test only ever reads. Skipped without borg.
 
 func requireBorg(t *testing.T) {
 	t.Helper()
@@ -29,8 +26,7 @@ func requireBorg(t *testing.T) {
 }
 
 // buildRepo creates an encrypted repo whose archives have the given ages (0 =
-// now; >0 backdates via borg's --timestamp). Returns the repo path and the env
-// (with BORG_PASSPHRASE) for the driver.
+// now; >0 backdates via --timestamp). Returns the repo path and env.
 func buildRepo(t *testing.T, ages map[string]time.Duration) (string, []string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -79,7 +75,6 @@ func runBorg(t *testing.T, dir string, env []string, args ...string) {
 }
 
 func driverFor(repo string, env []string) *Driver {
-	// Resolve BORG_PASSPHRASE from env into the driver.
 	pass := ""
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "BORG_PASSPHRASE="); ok {
@@ -139,19 +134,17 @@ func TestIntegrationDriver(t *testing.T) {
 	}
 }
 
-// Sabotage: truncated-segment. A corrupted repo segment is the one case engines
-// themselves catch — borg check must flag it, proving L1 delegation works.
+// Sabotage: truncated-segment — the one corruption engines catch themselves;
+// borg check must flag it.
 func TestIntegrationTruncatedSegment(t *testing.T) {
 	requireBorg(t)
 	ctx := context.Background()
 	repo, env := buildRepo(t, map[string]time.Duration{"a": 0})
 
-	// Healthy first.
 	if rep, err := driverFor(repo, env).NativeCheck(ctx, driver.NativeCheckOpts{}); err != nil || !rep.OK {
 		t.Fatalf("pre-corruption check: OK=%v err=%v", rep.OK, err)
 	}
 
-	// Truncate the largest segment file.
 	seg := largestFile(t, filepath.Join(repo, "data"))
 	info, _ := os.Stat(seg)
 	if err := os.Truncate(seg, info.Size()-64); err != nil {
@@ -167,9 +160,8 @@ func TestIntegrationTruncatedSegment(t *testing.T) {
 	}
 }
 
-// Sabotage: stale-source (borg). The newest archive is 30 days old — a source
-// that went stale. The newest snapshot's age must exceed a typical max_proof
-// window, which is what snapshot_max_age flags as fail.
+// Sabotage: stale-source. The newest archive is 30 days old; its age must exceed
+// a typical window, which is what snapshot_max_age flags as fail.
 func TestIntegrationStaleSource(t *testing.T) {
 	requireBorg(t)
 	ctx := context.Background()

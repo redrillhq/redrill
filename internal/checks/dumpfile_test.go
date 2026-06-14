@@ -152,8 +152,7 @@ type failingReader struct{}
 
 func (failingReader) Read([]byte) (int, error) { return 0, errors.New("disk read failed") }
 
-// A read failure while decompressing is the auditor's problem (error), not a
-// corrupt dump (fail): testGzip must report it came from the underlying reader.
+// A read failure while decompressing is error, not fail.
 func TestCompressionIOFailureDetected(t *testing.T) {
 	t.Parallel()
 	if err, ioFailure := testGzip(&failingReader{}); err == nil || !ioFailure {
@@ -161,7 +160,6 @@ func TestCompressionIOFailureDetected(t *testing.T) {
 	}
 }
 
-// setCompressionResult keeps fail≠error: I/O failure → error, bad stream → fail.
 func TestSetCompressionResult(t *testing.T) {
 	t.Parallel()
 	var ev Evidence

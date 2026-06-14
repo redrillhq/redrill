@@ -12,8 +12,7 @@ import (
 	"github.com/alyamovsky/redrill/internal/config"
 )
 
-// Clock is the scheduler's view of time: Now drives scheduling decisions
-// (injected so tests are deterministic) and After waits for the next fire.
+// Clock is injected so tests are deterministic.
 type Clock interface {
 	Now() time.Time
 	After(d time.Duration) <-chan time.Time
@@ -24,14 +23,12 @@ type realClock struct{}
 func (realClock) Now() time.Time                         { return time.Now().UTC() }
 func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
-// RunFunc executes one drill to completion. serve wires it to the orchestrator;
-// tests inject a fake. The scheduler owns the timeout and single-flight gating
-// around each call.
+// RunFunc executes one drill. The scheduler owns the timeout and single-flight
+// gating around each call.
 type RunFunc func(ctx context.Context, drill config.Drill) error
 
-// job pairs a drill with its parsed schedule and its next fire time. base is the
-// next un-jittered scheduled instant; fire is base plus this period's jitter and
-// is what the loop actually waits for.
+// job's base is the un-jittered scheduled instant; fire is base plus this
+// period's jitter, what the loop waits on.
 type job struct {
 	drill    config.Drill
 	schedule Schedule
@@ -48,21 +45,17 @@ type Options struct {
 	Rng         func() float64 // jitter fraction in [0,1); injectable for tests
 }
 
-// Scheduler fires drills on their schedules with jitter, global single-flight,
-// and per-run timeouts. Time-dependent decisions use an injected Clock; the
-// runs themselves go through RunFunc. See DESIGN.md §9.6.
 type Scheduler struct {
 	clock Clock
 	run   RunFunc
 	log   *slog.Logger
 	rng   func() float64
-	sem   chan struct{} // global single-flight token bucket, cap = concurrency
+	sem   chan struct{} // single-flight token bucket, cap = concurrency
 	jobs  []*job
-	wg    sync.WaitGroup // tracks in-flight runs for graceful shutdown
+	wg    sync.WaitGroup // in-flight runs, for graceful shutdown
 }
 
-// New builds a Scheduler over drills, parsing each schedule up front (an invalid
-// schedule is a configuration error). run is the per-drill executor.
+// New parses each schedule up front; an invalid schedule is a configuration error.
 func New(drills []config.Drill, run RunFunc, opts Options) (*Scheduler, error) {
 	if opts.Concurrency < 1 {
 		opts.Concurrency = 1
@@ -96,9 +89,8 @@ func New(drills []config.Drill, run RunFunc, opts Options) (*Scheduler, error) {
 	return s, nil
 }
 
-// Run drives the scheduler loop until ctx is canceled, then waits for in-flight
-// runs to wind down (their contexts derive from ctx, so they are already
-// canceling). It returns ctx.Err().
+// Run loops until ctx is canceled, then waits for in-flight runs (whose contexts
+// derive from ctx). Returns ctx.Err().
 func (s *Scheduler) Run(ctx context.Context) error {
 	if len(s.jobs) == 0 {
 		s.log.Warn("no drills scheduled; serve is idle")
@@ -119,7 +111,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			wake = s.clock.After(wait)
 		}
 		// A nil wake channel blocks forever in select, so with no jobs the loop
-		// simply waits for cancellation.
+		// waits for cancellation.
 		select {
 		case <-ctx.Done():
 			s.log.Info("scheduler stopping; waiting for in-flight runs")
@@ -130,11 +122,9 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	}
 }
 
-// due returns the jobs due at now, advancing each to its next fire, plus the
-// soonest upcoming fire across all jobs (zero if there are none). It is pure
-// given now — the caller dispatches — so it is deterministic to test. Missed
-// fires are not replayed: a job advances to the next slot strictly after now, so
-// downtime never produces a backlog burst (staleness covers the gap instead).
+// due returns the jobs due at now (advancing each) plus the soonest upcoming fire
+// (zero if none). Missed fires aren't replayed — a job advances to the next slot
+// strictly after now, so downtime produces no backlog burst; staleness covers the gap.
 func (s *Scheduler) due(now time.Time) ([]*job, time.Time) {
 	var ready []*job
 	var soonest time.Time
@@ -150,14 +140,12 @@ func (s *Scheduler) due(now time.Time) ([]*job, time.Time) {
 	return ready, soonest
 }
 
-// advance sets a job's next fire to the first scheduled slot after now, plus a
-// fresh jitter offset for this period.
 func (s *Scheduler) advance(j *job, now time.Time) {
 	j.base = j.schedule.Next(now)
 	j.fire = j.base.Add(s.jitter(j.drill.Jitter.Duration()))
 }
 
-// jitter returns a random delay in [0, max). max <= 0 yields no jitter.
+// jitter returns a delay in [0, max); max <= 0 yields none.
 func (s *Scheduler) jitter(max time.Duration) time.Duration {
 	if max <= 0 {
 		return 0
@@ -165,9 +153,8 @@ func (s *Scheduler) jitter(max time.Duration) time.Duration {
 	return time.Duration(s.rng() * float64(max))
 }
 
-// dispatch runs a drill if a single-flight slot is free, else skips it with a
-// warning (single-flight drops excess rather than queueing heavy restores — the
-// next scheduled run will try again). The run is bounded by the drill's timeout.
+// dispatch drops a drill when no single-flight slot is free — excess isn't
+// queued; the next scheduled run retries.
 func (s *Scheduler) dispatch(ctx context.Context, j *job) {
 	select {
 	case s.sem <- struct{}{}:

@@ -1,6 +1,4 @@
-// Package docker implements the sandbox runtime via the Docker Engine API (which
-// also serves podman's compatible socket). Sandboxes default to network=none and
-// carry the io.redrill.run label so the janitor can reap orphans.
+// Package docker runs sandboxes on the Docker Engine API (and podman's compatible socket).
 package docker
 
 import (
@@ -23,14 +21,12 @@ import (
 	"github.com/alyamovsky/redrill/internal/sandbox"
 )
 
-// Runtime is a Docker-backed sandbox.SandboxRuntime.
 type Runtime struct {
 	cli *client.Client
 }
 
-// NewRuntime connects to the local Docker/podman daemon. If the daemon is
-// unreachable it returns sandbox.ErrNoRuntime, so the caller degrades L3 to
-// skipped rather than failing.
+// NewRuntime connects to the local Docker/podman daemon, returning
+// sandbox.ErrNoRuntime if unreachable so the caller degrades L3 to skipped.
 func NewRuntime(ctx context.Context) (*Runtime, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -43,10 +39,8 @@ func NewRuntime(ctx context.Context) (*Runtime, error) {
 	return &Runtime{cli: cli}, nil
 }
 
-// Close releases the Docker client.
 func (r *Runtime) Close() error { return r.cli.Close() }
 
-// Start creates, starts, waits for, and seeds a sandbox container.
 func (r *Runtime) Start(ctx context.Context, spec sandbox.SandboxSpec) (sandbox.Sandbox, error) {
 	if err := r.ensureImage(ctx, spec.Image); err != nil {
 		return nil, err
@@ -103,8 +97,8 @@ func (r *Runtime) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
-// Janitor force-removes every container labeled by redrill (orphans from
-// crashed runs). It is safe to call at startup and returns how many it removed.
+// Janitor force-removes every container labeled by redrill (orphans from crashed
+// runs) and returns how many it removed. Safe to call at startup.
 func (r *Runtime) Janitor(ctx context.Context) (int, error) {
 	list, err := r.cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
@@ -128,7 +122,7 @@ type dockerSandbox struct {
 	closed bool
 }
 
-// Endpoint is unavailable under network=none — L3 talks to postgres via Exec.
+// Endpoint is unavailable under network=none; L3 talks to postgres via Exec.
 func (s *dockerSandbox) Endpoint(string) (string, error) {
 	return "", fmt.Errorf("sandbox endpoints are unavailable under network=none; use Exec")
 }
@@ -157,8 +151,7 @@ func (s *dockerSandbox) Exec(ctx context.Context, cmd []string) (sandbox.ExecRes
 	return sandbox.ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: insp.ExitCode}, nil
 }
 
-// Close force-removes the container; idempotent (a second call, or a container
-// already gone, is a no-op).
+// Close force-removes the container; idempotent (already-gone is a no-op).
 func (s *dockerSandbox) Close(ctx context.Context) error {
 	if s.closed {
 		return nil
@@ -174,9 +167,8 @@ func (s *dockerSandbox) Close(ctx context.Context) error {
 }
 
 // waitReady polls cmd until it exits 0, the container dies, or the context ends.
-// Detecting a dead container matters: a postgres that crashes on boot (tight
-// memory limit, bad image, corrupt init) would otherwise be polled until the
-// deadline; failing fast turns that into a prompt, clear error.
+// Detecting a dead container fails fast instead of polling a crashed boot
+// (tight memory, bad image, corrupt init) to the deadline.
 func (s *dockerSandbox) waitReady(ctx context.Context, cmd []string) error {
 	for {
 		if res, err := s.Exec(ctx, cmd); err == nil && res.ExitCode == 0 {
@@ -194,8 +186,7 @@ func (s *dockerSandbox) waitReady(ctx context.Context, cmd []string) error {
 }
 
 // terminalState reports whether the container has stopped for good (exited or
-// dead) along with its exit code; ok is false if the container is still
-// alive/starting or its state can't be read.
+// dead), with its exit code; ok is false if still alive or state is unreadable.
 func (s *dockerSandbox) terminalState(ctx context.Context) (status string, exitCode int, ok bool) {
 	insp, err := s.cli.ContainerInspect(ctx, s.id)
 	if err != nil || insp.State == nil {

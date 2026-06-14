@@ -25,13 +25,11 @@ import (
 	"github.com/alyamovsky/redrill/internal/sandbox"
 )
 
-// ErrNoSandboxRuntime signals that L3 can't run because no container runtime is
-// available; the orchestrator records the level as skipped — never a pass.
+// ErrNoSandboxRuntime records the level as skipped, never a pass.
 var ErrNoSandboxRuntime = errors.New("no sandbox runtime")
 
 const containerDumpPath = "/tmp/dump"
 
-// runDumpdirL3 boots a postgres sandbox from the newest dump and runs sql checks.
 func (e *LocalExecutor) runDumpdirL3(ctx context.Context, step StepSpec) (StepResult, error) {
 	res := StepResult{Level: step.Level}
 	if e.sandbox == nil {
@@ -57,8 +55,6 @@ func (e *LocalExecutor) runDumpdirL3(ctx context.Context, step StepSpec) (StepRe
 	return e.loadAndCheck(ctx, step, sc, d.Path(snaps[0].ID), red)
 }
 
-// runBorgL3 extracts the configured dump (extract_path) from the newest archive,
-// then boots a sandbox from it.
 func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResult, error) {
 	res := StepResult{Level: step.Level}
 	if e.sandbox == nil {
@@ -103,8 +99,6 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red)
 }
 
-// loadAndCheck is the shared L3 machinery: stage the dump, catch a version trap,
-// boot the sandbox, load, and run the sql checks against it.
 func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scratch, dumpSrc string, red *redact.Redactor) (StepResult, error) {
 	res := StepResult{Level: step.Level}
 	l3 := step.L3
@@ -133,8 +127,8 @@ func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scr
 		}
 	}
 
-	// Snapshot the databases before loading so loadedDB can distinguish the
-	// database the dump creates from one the image pre-created (e.g. POSTGRES_DB).
+	// Snapshot databases before loading so loadedDB can tell the dump's database
+	// from one the image pre-created (e.g. POSTGRES_DB).
 	before := listDatabases(ctx, sb)
 	loadEv := loadDump(ctx, sb, resolveLoader(l3.Load, format))
 	redactEvidence(red, &loadEv)
@@ -196,9 +190,7 @@ func buildL3Check(cc config.Check, db string) checks.Check {
 	return nil
 }
 
-// resolveLoader picks which loader to run: an explicit load: pg_restore|psql in
-// the drill config wins; otherwise (auto) it follows the detected dump format
-// (custom → pg_restore, plain → psql).
+// resolveLoader: explicit pg_restore|psql wins; else custom → pg_restore, plain → psql.
 func resolveLoader(load, format string) string {
 	switch load {
 	case "pg_restore", "psql":
@@ -211,9 +203,8 @@ func resolveLoader(load, format string) string {
 	}
 }
 
-// loadDump runs the chosen loader. Load errors are tolerated and counted — the
-// sql asserts give the verdict (DESIGN §6); only an inability to run the loader
-// at all is an error here.
+// loadDump tolerates load errors — the sql asserts give the verdict; only an
+// inability to run the loader is error here.
 func loadDump(ctx context.Context, sb sandbox.Sandbox, loader string) checks.Evidence {
 	ev := checks.Evidence{Kind: "load", Target: containerDumpPath, Expected: "dump loads"}
 	cmd := []string{"psql", "-U", "postgres", "-d", "postgres", "-f", containerDumpPath}
@@ -230,7 +221,6 @@ func loadDump(ctx context.Context, sb sandbox.Sandbox, loader string) checks.Evi
 	return ev
 }
 
-// listDatabases returns the non-template databases present in the sandbox.
 func listDatabases(ctx context.Context, sb sandbox.Sandbox) map[string]bool {
 	set := map[string]bool{}
 	res, err := sb.Exec(ctx, []string{
@@ -248,11 +238,8 @@ func listDatabases(ctx context.Context, sb sandbox.Sandbox) map[string]bool {
 	return set
 }
 
-// loadedDB picks the database the dump populated. A dump may CREATE its own
-// database, so prefer one that appeared only after the load (diffed against
-// before). Falls back to postgres — where loadDump targets — so a database the
-// image pre-created (POSTGRES_DB) but the dump never wrote is not mistaken for
-// the restored data.
+// loadedDB picks a database that appeared only after the load, else postgres —
+// so an image-pre-created POSTGRES_DB the dump never wrote isn't mistaken for it.
 func loadedDB(ctx context.Context, sb sandbox.Sandbox, before map[string]bool) string {
 	var created []string
 	for db := range listDatabases(ctx, sb) {
@@ -286,8 +273,6 @@ func versionTrapResult(res StepResult, dumpMajor, imageMajor int, dumpSrc string
 	return res
 }
 
-// stageDump decompresses (or copies) the source dump into scratch — bounded by
-// the scratch byte quota — and reports its pg_dump format (custom vs plain).
 func stageDump(src, scratchRoot string, maxBytes int64) (string, string, error) {
 	loaded := filepath.Join(scratchRoot, "dump")
 	if err := decompressTo(src, loaded, maxBytes); err != nil {
@@ -316,7 +301,7 @@ func decompressTo(src, dst string, maxBytes int64) error {
 		return err
 	}
 	defer func() { _ = out.Close() }()
-	w := quotaWriter(out, maxBytes) // bound the decompressed output by the scratch quota
+	w := quotaWriter(out, maxBytes)
 
 	switch {
 	case n >= 2 && magic[0] == 0x1f && magic[1] == 0x8b:
@@ -325,7 +310,7 @@ func decompressTo(src, dst string, maxBytes int64) error {
 			return err
 		}
 		defer func() { _ = zr.Close() }()
-		_, err = io.Copy(w, zr) //nolint:gosec // G110: decompressed output is bounded by quotaWriter (the scratch byte quota)
+		_, err = io.Copy(w, zr) //nolint:gosec // G110: output bounded by quotaWriter
 		return err
 	case n >= 4 && magic[0] == 0x28 && magic[1] == 0xb5 && magic[2] == 0x2f && magic[3] == 0xfd:
 		zr, err := zstd.NewReader(in)
@@ -341,14 +326,11 @@ func decompressTo(src, dst string, maxBytes int64) error {
 	}
 }
 
-// errScratchQuota marks a stage that would exceed the scratch byte quota. The
-// orchestrator records it as error (the auditor declined to run), never fail —
-// the backup is not the problem (DESIGN §9.6).
+// errScratchQuota is recorded as error (the auditor declined), never fail.
 var errScratchQuota = errors.New("scratch quota exceeded")
 
-// quotaWriter bounds w to maxBytes (0 = unbounded), so decompressing a dump that
-// expands past the scratch quota fails with errScratchQuota instead of filling
-// the disk — the L3 counterpart to the L2 preflight.
+// quotaWriter bounds w to maxBytes (0 = unbounded) so an expanding dump can't
+// fill the disk.
 func quotaWriter(w io.Writer, maxBytes int64) io.Writer {
 	if maxBytes <= 0 {
 		return w
@@ -390,22 +372,20 @@ var (
 	versionRe  = regexp.MustCompile(`(?i)dumped from database version (\d+)`)
 )
 
-// pgMajor extracts the postgres major from an image reference's tag — e.g.
-// "postgres:16" or "registry.example.com:5000/library/postgres:16.2" → 16. A
-// digest pin or a non-numeric tag (":latest") yields 0, disabling the version
-// trap (we can't tell the major). Crucially it never mistakes a registry port
-// (host:5000/…) for the tag.
+// pgMajor extracts the postgres major from an image tag (e.g. "postgres:16.2" →
+// 16). A digest pin or non-numeric tag yields 0, disabling the version trap; a
+// registry port (host:5000/…) is never read as the tag.
 func pgMajor(image string) int {
 	ref := image
-	if i := strings.IndexByte(ref, '@'); i >= 0 { // drop a digest: "…@sha256:…"
+	if i := strings.IndexByte(ref, '@'); i >= 0 {
 		ref = ref[:i]
 	}
-	if i := strings.LastIndexByte(ref, '/'); i >= 0 { // drop the registry/path: "host:5000/…"
+	if i := strings.LastIndexByte(ref, '/'); i >= 0 {
 		ref = ref[i+1:]
 	}
 	i := strings.LastIndexByte(ref, ':')
 	if i < 0 {
-		return 0 // no tag
+		return 0
 	}
 	m := tagMajorRe.FindStringSubmatch(ref[i+1:])
 	if m == nil {
@@ -423,7 +403,7 @@ func plainDumpMajor(path string) int {
 	defer func() { _ = f.Close() }()
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	for i := 0; i < 300 && sc.Scan(); i++ { // the version header sits near the top
+	for i := 0; i < 300 && sc.Scan(); i++ { // version header sits near the top
 		if m := versionRe.FindStringSubmatch(sc.Text()); m != nil {
 			n, _ := strconv.Atoi(m[1])
 			return n

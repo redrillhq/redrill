@@ -112,7 +112,7 @@ func dash(s string) string {
 	return s
 }
 
-// humanMS renders a millisecond duration compactly ("3.2s", "850ms").
+// "3.2s", "850ms".
 func humanMS(ms int64) string {
 	if ms < 1000 {
 		return fmt.Sprintf("%dms", ms)

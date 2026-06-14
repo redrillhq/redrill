@@ -6,13 +6,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Check is one assertion in an L2/L3 level. In YAML each check is a single-key
-// mapping whose key is the kind: {path_exists: "config/config.php"},
-// {hash_match: true}, {sql: {query: "...", expect: "> 0"}}. The expect
-// mini-grammar itself is parsed in M4, not here.
+// In YAML each check is a single-key mapping whose key is the kind, e.g.
+// {path_exists: "config/config.php"}.
 type Check struct {
 	Kind                  string
-	Path                  string // path_exists / path_absent / canary_file target
+	Path                  string
 	HashMatch             bool
 	NewestFileMaxAge      Duration
 	FileCountTolerancePct int
@@ -22,13 +20,11 @@ type Check struct {
 	Exec                  string
 }
 
-// SQLCheck is the payload of an `sql` check: a query and an expect predicate.
 type SQLCheck struct {
 	Query  string `yaml:"query"`
 	Expect string `yaml:"expect"`
 }
 
-// Check kinds and the level each is valid at.
 const (
 	checkPathExists       = "path_exists"
 	checkPathAbsent       = "path_absent"
@@ -122,9 +118,8 @@ func (c *Check) validate(path, level string, es *errset) {
 	}
 }
 
-// knownKeys rejects any key in a mapping node outside the allowed set. Used to
-// keep nested check payloads strict, since a custom Unmarshaler bypasses the
-// decoder's KnownFields setting.
+// knownKeys rejects any key outside the allowed set; a custom Unmarshaler
+// bypasses the decoder's KnownFields setting.
 func knownKeys(n *yaml.Node, allowed ...string) error {
 	if n.Kind != yaml.MappingNode {
 		return fmt.Errorf("expected a mapping")

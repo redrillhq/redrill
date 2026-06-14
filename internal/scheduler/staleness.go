@@ -6,12 +6,9 @@ import (
 	"github.com/alyamovsky/redrill/internal/config"
 )
 
-// Stale reports whether a drill's proof has aged past its Proof SLA. It is a
-// pure function of timestamps (DESIGN §9.8): the SLA is on a proof *existing*,
-// not on drills running, so staleness fires even when the daemon was down — no
-// run or event is needed to detect it. A never-proven drill is stale (absence of
-// proof is itself the alert, DESIGN §3 story 1). A non-positive maxProofAge
-// means no SLA, so the drill is never stale.
+// Stale fires on a proof existing, not on drills running, so it fires even when
+// the daemon was down. A never-proven drill is stale; a non-positive maxProofAge
+// means no SLA.
 func Stale(maxProofAge time.Duration, lastProven, now time.Time) bool {
 	if maxProofAge <= 0 {
 		return false
@@ -22,9 +19,8 @@ func Stale(maxProofAge time.Duration, lastProven, now time.Time) bool {
 	return now.Sub(lastProven) > maxProofAge
 }
 
-// HeadlineLevel returns the highest level a drill configures (l3 > l2 > l1), or
-// "" if none. A drill's headline proof age — the number shown for it and the one
-// the Proof SLA is measured against — is this level's (DESIGN §6).
+// HeadlineLevel returns the highest configured level (l3 > l2 > l1, "" if none);
+// the Proof SLA is measured against its proof age.
 func HeadlineLevel(d config.Drill) string {
 	switch {
 	case d.Levels.L3 != nil:

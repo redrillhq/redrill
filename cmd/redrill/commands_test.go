@@ -18,8 +18,7 @@ import (
 )
 
 // setupStatusConfig writes a config with one dumpdir drill (L1, max_proof_age
-// 10d) and returns the config path plus its data_dir, so a test can pre-seed the
-// store before invoking a command.
+// 10d), returning the config path and its data_dir so a test can pre-seed the store.
 func setupStatusConfig(t *testing.T) (cfgPath, dataDir string) {
 	t.Helper()
 	tmp := t.TempDir()
@@ -40,8 +39,8 @@ drills:
 	return writeConfig(t, body), dataDir
 }
 
-// withStore opens the store at dataDir, runs fn against it, and closes it — so
-// each helper call leaves no open handle to race the command under test.
+// withStore opens the store at dataDir, runs fn, and closes it, so no open
+// handle races the command under test.
 func withStore(t *testing.T, dataDir string, fn func(*store.Store)) {
 	t.Helper()
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
@@ -260,7 +259,7 @@ func TestHistoryJSONLimit(t *testing.T) {
 	if len(arr) != 2 {
 		t.Fatalf("want 2 runs (limit -n 2), got %d", len(arr))
 	}
-	// newest first: ListRuns orders by id desc, so the first id is the largest.
+	// ListRuns orders by id desc, so the first id is the largest.
 	if id0, id1 := arr[0]["id"].(float64), arr[1]["id"].(float64); id0 <= id1 {
 		t.Errorf("want newest first (id %v > %v)", id0, id1)
 	}
@@ -294,9 +293,8 @@ drills: [{name: d, source: dumps, schedule: "nope", levels: {l1: {max_age: 36h}}
 	})
 }
 
-// TestServeStartStop exercises the daemon wiring end to end: serve boots the
-// store + scheduler and returns 0 when its context is canceled. The cancel is
-// issued only once the store file exists, so it can't race store startup.
+// TestServeStartStop: serve boots the store + scheduler and returns 0 on cancel.
+// The cancel waits for the store file so it can't race startup.
 func TestServeStartStop(t *testing.T) {
 	cfgPath, dataDir := setupStatusConfig(t)
 	cfg, err := config.Load(cfgPath)

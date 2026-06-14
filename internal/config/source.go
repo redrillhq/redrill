@@ -1,15 +1,14 @@
 package config
 
-// Source is a place backups live plus the driver that reads it. Secret-bearing
-// fields exist only as *_file / *_env references; there is deliberately no
-// inline form (an inline key is rejected by strict parsing).
+// Secret-bearing fields exist only as *_file / *_env references; there is
+// deliberately no inline form.
 type Source struct {
 	Name string `yaml:"name"`
 	Type string `yaml:"type"` // borg | dumpdir | restic
 
 	// borg / restic
 	Repo   string `yaml:"repo"`
-	Binary string `yaml:"binary"` // optional override / version pin
+	Binary string `yaml:"binary"`
 
 	// borg
 	PassphraseFile string `yaml:"passphrase_file"`

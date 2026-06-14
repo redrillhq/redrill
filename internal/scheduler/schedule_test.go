@@ -31,7 +31,7 @@ func TestParseScheduleErrors(t *testing.T) {
 
 func TestParseScheduleNext(t *testing.T) {
 	t.Parallel()
-	// A Wednesday at 12:00 UTC — the reference "now" for every case.
+	// A Wednesday at 12:00 UTC.
 	now := time.Date(2026, time.June, 10, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name       string
@@ -67,8 +67,7 @@ func TestParseScheduleNext(t *testing.T) {
 	}
 }
 
-// TestScheduleNextIsUTC pins the timezone contract: identical instants in
-// different zones yield the same next fire, regardless of host TZ.
+// Identical instants in different zones yield the same next fire.
 func TestScheduleNextIsUTC(t *testing.T) {
 	t.Parallel()
 	s, err := ParseSchedule("Sun 04:10")

@@ -9,14 +9,12 @@ import (
 	"github.com/alyamovsky/redrill/internal/driver"
 )
 
-// selectSample picks which paths of an archive to restore for L2: every file
-// under an include_path, plus the M newest by mtime, plus N seeded-random
-// others (DESIGN §6). The seed makes selection reproducible (TESTING.md); the
-// executor seeds it from the run id so coverage varies across runs. Returns the
-// chosen paths (sorted) and their total size, for the scratch preflight.
+// selectSample picks paths to restore for L2: every file under an include_path,
+// the M newest by mtime, and N others chosen by a seed (the run id) that keeps
+// selection reproducible yet varies coverage across runs.
 func selectSample(files []driver.FileEntry, sample *config.Sample, includePaths []string, seed uint64) ([]string, int64) {
 	picked := map[string]int64{}
-	var pool []driver.FileEntry // regular files not already pinned by include_paths
+	var pool []driver.FileEntry
 	for _, f := range files {
 		if !f.IsFile {
 			continue
@@ -59,7 +57,6 @@ func selectSample(files []driver.FileEntry, sample *config.Sample, includePaths 
 	return paths, total
 }
 
-// underAny reports whether path is one of, or sits under, any of the prefixes.
 func underAny(path string, prefixes []string) bool {
 	for _, p := range prefixes {
 		p = strings.TrimSuffix(p, "/")

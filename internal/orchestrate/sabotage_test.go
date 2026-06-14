@@ -11,11 +11,8 @@ import (
 	"github.com/alyamovsky/redrill/internal/store"
 )
 
-// The sabotage kit (TESTING.md, DESIGN §13.3): each fixture is a "perfect cron,
-// dead backup" scenario (DESIGN §2.1) that redrill must flag. The gate
-// (make test-sabotage) fails unless the exact verdict and catching check hold.
-// dumpdir fixtures are built here rather than committed because they depend on
-// file mtime, which git does not preserve.
+// Sabotage kit: each fixture is a "perfect cron, dead backup" redrill must flag.
+// Built here, not committed, because they depend on mtime, which git drops.
 
 func writeRaw(t *testing.T, path, content string, mtime time.Time) {
 	t.Helper()
@@ -27,7 +24,7 @@ func writeRaw(t *testing.T, path, content string, mtime time.Time) {
 	}
 }
 
-// assertCaught fails unless some check in byKinds returned fail.
+// assertCaught fails unless some byKinds check returned fail.
 func assertCaught(t *testing.T, res RunResult, byKinds ...string) {
 	t.Helper()
 	want := map[string]bool{}
@@ -44,8 +41,8 @@ func assertCaught(t *testing.T, res RunResult, byKinds ...string) {
 	t.Errorf("no failing check among %v caught the sabotage; levels = %+v", byKinds, res.Levels)
 }
 
-// empty-dump: the cron "succeeded" but wrote an empty file with a plausible name
-// and fresh mtime. file_min_bytes and compression_test must catch it as fail.
+// empty-dump: 0-byte file with a plausible name and fresh mtime;
+// file_min_bytes and compression_test must catch it.
 func TestSabotageEmptyDump(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -60,8 +57,7 @@ func TestSabotageEmptyDump(t *testing.T) {
 	assertCaught(t, res, "file_min_bytes", "compression_test")
 }
 
-// stale-source (dumpdir variant): a valid, healthy-looking dump — but 30 days
-// old, because the source went stale. Only max_age should flag it.
+// stale-source: a valid dump but 30 days old; only max_age should flag it.
 func TestSabotageStaleSource(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -18,7 +18,7 @@ func TestScratchPreflightQuota(t *testing.T) {
 		t.Errorf("under quota: %v, want nil", err)
 	}
 	if err := sc.preflight(2000); err == nil {
-		t.Error("over quota: want error (the auditor refuses, not a fail)")
+		t.Error("over quota: want error, not fail")
 	}
 }
 

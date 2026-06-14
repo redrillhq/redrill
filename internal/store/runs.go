@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-// scanner is the read surface common to *sql.Row and *sql.Rows.
+// scanner is the common surface of *sql.Row and *sql.Rows.
 type scanner interface{ Scan(dest ...any) error }
 
 const runColumns = `id, drill, "trigger", started_at, finished_at, result, level_reached, bytes_restored, files_restored, duration_ms, executor`
@@ -24,9 +24,8 @@ const (
 	artifactByRun = `SELECT run_id, idx, name, path, bytes FROM artifacts WHERE run_id = ? ORDER BY idx`
 )
 
-// CreateRun inserts a started (unfinished) run and returns its id. Drill,
-// Trigger, and StartedAt are required; Result/FinishedAt are set later by
-// FinishRun. Idx-bearing children (steps/evidence/artifacts) reference the id.
+// CreateRun inserts an unfinished run. Drill, Trigger, and StartedAt are
+// required.
 func (s *Store) CreateRun(ctx context.Context, r Run) (int64, error) {
 	switch {
 	case r.Drill == "":
@@ -51,9 +50,8 @@ func (s *Store) CreateRun(ctx context.Context, r Run) (int64, error) {
 	return id, nil
 }
 
-// FinishRun records a run's outcome. It reads r.ID and the finish fields
-// (FinishedAt, Result, LevelReached, BytesRestored, DurationMS); identity fields
-// set by CreateRun (drill, trigger, started_at, executor) are left untouched.
+// FinishRun records a run's outcome by r.ID; identity fields set by CreateRun
+// are left untouched. Returns wrapped ErrNotFound for an unknown id.
 func (s *Store) FinishRun(ctx context.Context, r Run) error {
 	if r.ID == 0 {
 		return fmt.Errorf("finish run: id required")
@@ -75,7 +73,7 @@ func (s *Store) FinishRun(ctx context.Context, r Run) error {
 	return nil
 }
 
-// GetRun returns the run with the given id, or a wrapped ErrNotFound.
+// GetRun returns wrapped ErrNotFound when absent.
 func (s *Store) GetRun(ctx context.Context, id int64) (Run, error) {
 	r, err := scanRun(s.db.QueryRowContext(ctx, runByID, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -115,9 +113,7 @@ func (s *Store) ListRuns(ctx context.Context, drill string, limit int) ([]Run, e
 	return out, nil
 }
 
-// LastRunWithResult returns the most recent run for a drill with the given
-// result, and whether one exists. The orchestrator uses it to find the previous
-// proven run's restored file count (the file_count_tolerance baseline).
+// LastRunWithResult returns the most recent matching run, ok=false if none.
 func (s *Store) LastRunWithResult(ctx context.Context, drill string, result Result) (Run, bool, error) {
 	q := `SELECT ` + runColumns + ` FROM runs WHERE drill = ? AND result = ? ORDER BY id DESC LIMIT 1`
 	r, err := scanRun(s.db.QueryRowContext(ctx, q, drill, string(result)))
@@ -172,7 +168,6 @@ func (s *Store) AddStep(ctx context.Context, st RunStep) error {
 	return nil
 }
 
-// AddEvidence appends an evidence row to a run; Idx is assigned in insertion order.
 func (s *Store) AddEvidence(ctx context.Context, e Evidence) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO evidence (run_id, idx, check_kind, target, expected, actual, status, weak)
@@ -184,7 +179,6 @@ func (s *Store) AddEvidence(ctx context.Context, e Evidence) error {
 	return nil
 }
 
-// AddArtifact appends an artifact row to a run; Idx is assigned in insertion order.
 func (s *Store) AddArtifact(ctx context.Context, a Artifact) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO artifacts (run_id, idx, name, path, bytes)
@@ -196,7 +190,6 @@ func (s *Store) AddArtifact(ctx context.Context, a Artifact) error {
 	return nil
 }
 
-// ListSteps returns a run's steps ordered by idx.
 func (s *Store) ListSteps(ctx context.Context, runID int64) ([]RunStep, error) {
 	rows, err := s.db.QueryContext(ctx, stepsByRun, runID)
 	if err != nil {
@@ -224,7 +217,6 @@ func (s *Store) ListSteps(ctx context.Context, runID int64) ([]RunStep, error) {
 	return out, nil
 }
 
-// ListEvidence returns a run's evidence ordered by idx.
 func (s *Store) ListEvidence(ctx context.Context, runID int64) ([]Evidence, error) {
 	rows, err := s.db.QueryContext(ctx, evidenceByRun, runID)
 	if err != nil {
@@ -250,7 +242,6 @@ func (s *Store) ListEvidence(ctx context.Context, runID int64) ([]Evidence, erro
 	return out, nil
 }
 
-// ListArtifacts returns a run's artifacts ordered by idx.
 func (s *Store) ListArtifacts(ctx context.Context, runID int64) ([]Artifact, error) {
 	rows, err := s.db.QueryContext(ctx, artifactByRun, runID)
 	if err != nil {

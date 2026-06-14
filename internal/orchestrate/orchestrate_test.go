@@ -149,9 +149,9 @@ func TestRunErrorOnUnreadableDir(t *testing.T) {
 func TestRunShortCircuitsHigherLevels(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-30*24*time.Hour)) // L1 will fail (stale)
+	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-30*24*time.Hour)) // stale
 	levels := l1Full()
-	levels.L3 = &config.L3{} // configured but unimplemented in M5
+	levels.L3 = &config.L3{} // configured but unimplemented
 
 	st := newStore(t)
 	drill, src := drillFor(dir, levels)
@@ -174,8 +174,7 @@ func TestRunShortCircuitsHigherLevels(t *testing.T) {
 	}
 }
 
-// L3 with no container runtime degrades to skipped (never a silent pass): the
-// run still passes on L1, but L3 is not proven.
+// No container runtime: L3 degrades to skipped (never a silent pass), L1 still passes.
 func TestRunNoSandboxRuntimeSkipsL3(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

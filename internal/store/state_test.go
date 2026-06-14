@@ -59,7 +59,7 @@ func TestRecordProofAdvances(t *testing.T) {
 }
 
 // recordOnPass models the orchestrator policy: drill_state advances only on a
-// full pass at a level (DESIGN §6, ARCHITECTURE run lifecycle).
+// pass.
 func recordOnPass(ctx context.Context, t *testing.T, s *Store, drill string, at time.Time, results map[string]Result) {
 	t.Helper()
 	for level, res := range results {
@@ -77,7 +77,7 @@ func TestDrillStateOnlyOnPass(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)
 
-	// Run 1: L1 passes, L2 fails → only L1 is proven.
+	// L1 passes, L2 fails → only L1 proven.
 	recordOnPass(ctx, t, s, "d", epoch, map[string]Result{"l1": ResultPass, "l2": ResultFail})
 	if _, ok, _ := s.GetProof(ctx, "d", "l1"); !ok {
 		t.Error("L1 should be proven after a pass")
@@ -86,7 +86,7 @@ func TestDrillStateOnlyOnPass(t *testing.T) {
 		t.Error("L2 must not be proven after a fail")
 	}
 
-	// Run 2 (a week later): both pass → L1 advances, L2 becomes proven.
+	// A week later both pass → L1 advances, L2 now proven.
 	week := epoch.Add(7 * 24 * time.Hour)
 	recordOnPass(ctx, t, s, "d", week, map[string]Result{"l1": ResultPass, "l2": ResultPass})
 
@@ -99,7 +99,7 @@ func TestDrillStateOnlyOnPass(t *testing.T) {
 		t.Errorf("L2 proof = (%v, %v), want %v", l2, ok, week)
 	}
 
-	// Run 3: L2 errors (auditor blind, not a backup failure) → no advance.
+	// L2 errors (not a backup failure) → no advance.
 	twoWeeks := epoch.Add(14 * 24 * time.Hour)
 	recordOnPass(ctx, t, s, "d", twoWeeks, map[string]Result{"l2": ResultError})
 	l2, _, _ = s.GetProof(ctx, "d", "l2")

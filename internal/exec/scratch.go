@@ -7,8 +7,6 @@ import (
 	"syscall"
 )
 
-// scratch is a per-run restore directory with a byte quota. Redrill restores
-// into it, runs L2/L3 against it, and removes it afterward (cleanup always).
 type scratch struct {
 	root     string
 	maxBytes int64
@@ -22,9 +20,7 @@ func newScratch(base string, runID int64, maxBytes int64) (*scratch, error) {
 	return &scratch{root: root, maxBytes: maxBytes}, nil
 }
 
-// preflight refuses, before any restore starts, if the predicted restore size
-// won't fit the quota or the free disk at the scratch location (DESIGN §9.6).
-// The refusal is an error (the auditor declined to run), never a fail.
+// preflight refusal is error (the auditor declined), never fail.
 func (s *scratch) preflight(predicted int64) error {
 	if predicted < 0 {
 		predicted = 0
@@ -44,21 +40,15 @@ func (s *scratch) preflight(predicted int64) error {
 
 func (s *scratch) cleanup() { _ = os.RemoveAll(s.root) }
 
-// freeBytes returns the space available to a non-root user at path.
 func freeBytes(path string) (uint64, error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
 		return 0, fmt.Errorf("statfs %s: %w", path, err)
 	}
-	// syscall.Statfs_t.Bsize is signed on Linux but unsigned on darwin; route the
-	// unsigned conversion through one guarded helper (int64 is a widening on
-	// darwin, a no-op on Linux) so it lints clean — gosec G115 — on every platform.
+	// Statfs_t.Bsize is signed on Linux, unsigned on darwin; the int64 cast is safe on both.
 	return availableBytes(st.Bavail, int64(st.Bsize)), nil
 }
 
-// availableBytes multiplies a free-block count by its block size. A filesystem
-// block size is never negative; the guard keeps the unsigned conversion
-// overflow-safe.
 func availableBytes(blocks uint64, blockSize int64) uint64 {
 	if blockSize <= 0 {
 		return 0

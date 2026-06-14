@@ -11,12 +11,7 @@ import (
 	"time"
 )
 
-// L2 (restorability) check kinds (DESIGN §6, §7). path_exists / path_absent /
-// canary_file inspect the restored tree; newest_file_max_age / min_total_bytes /
-// file_count_tolerance_pct work on aggregates the executor computes once over the
-// restore; hash_match verifies restored bytes against an engine manifest where
-// the engine exposes one.
-
+// Run against the restored tree.
 const (
 	kindPathExists         = "path_exists"
 	kindPathAbsent         = "path_absent"
@@ -27,8 +22,6 @@ const (
 	kindFileCountTolerance = "file_count_tolerance_pct"
 )
 
-// PathExists fails if Path is missing from the restored tree (a dropped data
-// directory, the missing-data-dir failure class).
 type PathExists struct{ Path string }
 
 func (c PathExists) Kind() string { return kindPathExists }
@@ -36,8 +29,6 @@ func (c PathExists) Run(_ context.Context, env CheckEnv) (Evidence, error) {
 	return pathEvidence(kindPathExists, env.RestoreDir, c.Path, false, false), nil
 }
 
-// PathAbsent fails if Path IS present (e.g. a file that should never be in the
-// backup).
 type PathAbsent struct{ Path string }
 
 func (c PathAbsent) Kind() string { return kindPathAbsent }
@@ -45,8 +36,7 @@ func (c PathAbsent) Run(_ context.Context, env CheckEnv) (Evidence, error) {
 	return pathEvidence(kindPathAbsent, env.RestoreDir, c.Path, true, false), nil
 }
 
-// CanaryFile is a weak path-exists: a comfort-only marker, always labeled weak so
-// reports never let it stand in for real proof (DESIGN §4).
+// Weak — never counts as proof.
 type CanaryFile struct{ Path string }
 
 func (c CanaryFile) Kind() string { return kindCanaryFile }
@@ -76,8 +66,6 @@ func pathEvidence(kind, restoreDir, path string, absent, weak bool) Evidence {
 	return ev
 }
 
-// NewestFileMaxAge fails if the newest restored file is older than Max — a stale
-// source that still restores intact.
 type NewestFileMaxAge struct {
 	Newest time.Time
 	Max    time.Duration
@@ -99,7 +87,6 @@ func (c NewestFileMaxAge) Run(_ context.Context, env CheckEnv) (Evidence, error)
 	return ev, nil
 }
 
-// MinTotalBytes fails if the restore totals fewer than Min bytes.
 type MinTotalBytes struct {
 	Total int64
 	Min   int64
@@ -115,8 +102,7 @@ func (c MinTotalBytes) Run(_ context.Context, _ CheckEnv) (Evidence, error) {
 	return ev, nil
 }
 
-// FileCountTolerance fails if the restored file count drifts more than Pct% from
-// the previous proven run's count. With no baseline (first proven run) it passes.
+// Prev is the last proven count; with no baseline it passes.
 type FileCountTolerance struct {
 	Count int
 	Prev  int
@@ -140,10 +126,8 @@ func (c FileCountTolerance) Run(_ context.Context, _ CheckEnv) (Evidence, error)
 	return ev, nil
 }
 
-// HashMatch verifies restored bytes against an engine-provided manifest of
-// path→sha256. An empty manifest means the engine verifies content integrity on
-// restore itself (borg checks chunk hashes during extract), so the bytes are
-// engine-verified — passed, not skipped, and clearly labeled.
+// Manifest is path→sha256; empty means the engine verified on extract, so passed,
+// not skipped.
 type HashMatch struct {
 	Manifest map[string]string
 }

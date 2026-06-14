@@ -20,9 +20,18 @@ func RequireBorg(t *testing.T) {
 type borgSpec struct {
 	archiveAge time.Duration
 	omitData   bool
+	files      []borgFile
 }
 
+type borgFile struct{ rel, content string }
+
 type BorgOption func(*borgSpec)
+
+// BorgFile places an extra file at rel inside the archive — e.g. a Postgres dump
+// for a borg L3 drill's extract_path.
+func BorgFile(rel, content string) BorgOption {
+	return func(s *borgSpec) { s.files = append(s.files, borgFile{rel, content}) }
+}
 
 // BorgArchiveAge backdates the archive by d via borg create --timestamp (a stale
 // source).
@@ -54,6 +63,11 @@ func Borg(t *testing.T, opts ...BorgOption) (repo, passFile string) {
 	if !s.omitData {
 		mkdirAll(t, filepath.Join(src, "data", "docs"))
 		writeBytes(t, filepath.Join(src, "data", "docs", "a.txt"), []byte(strings.Repeat("payload\n", 200)))
+	}
+	for _, f := range s.files {
+		p := filepath.Join(src, filepath.FromSlash(f.rel))
+		mkdirAll(t, filepath.Dir(p))
+		writeBytes(t, p, []byte(f.content))
 	}
 	passFile = filepath.Join(dir, "pass")
 	writeBytes(t, passFile, []byte("testpass"))

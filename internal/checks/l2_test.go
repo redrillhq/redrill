@@ -112,3 +112,18 @@ func TestHashMatch(t *testing.T) {
 		t.Errorf("missing file: %s, want error", ev.Status)
 	}
 }
+
+// A restored dangling symlink (its target is missing) must read as not-present
+// for path_exists — "looks present but isn't". path_absent currently follows the
+// link and reports absent; that stat-follow behavior is a tracked backlog item.
+func TestPathExistsDanglingSymlink(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, "nonexistent-target"), filepath.Join(dir, "config.php")); err != nil {
+		t.Fatal(err)
+	}
+	env := CheckEnv{RestoreDir: dir, Now: now}
+	if ev, _ := (PathExists{Path: "config.php"}).Run(context.Background(), env); ev.Status != Fail {
+		t.Errorf("path_exists on a dangling symlink: %s, want fail (target missing)", ev.Status)
+	}
+}

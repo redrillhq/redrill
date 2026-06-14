@@ -118,3 +118,23 @@ func runL3Drill(t *testing.T, rt *docker.Runtime, dir, image string, cfgChecks [
 	}
 	return res
 }
+
+func runBorgL3Drill(t *testing.T, rt *docker.Runtime, repo, passFile, extractPath, image string, cfgChecks []config.Check) RunResult {
+	t.Helper()
+	st := newStore(t)
+	drill := config.Drill{Name: "nc-db", Source: "borg1", Levels: config.Levels{
+		L3: &config.L3{
+			ExtractPath: extractPath,
+			Sandbox:     config.Sandbox{Image: image, Memory: config.Size(1 << 30)},
+			Checks:      cfgChecks,
+		},
+	}}
+	o := New(st, exe.NewLocal("test").WithSandbox(rt), func() time.Time { return time.Now().UTC() })
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	res, err := o.Run(ctx, drill, borgSource(repo, passFile), RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return res
+}

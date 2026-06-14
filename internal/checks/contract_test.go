@@ -46,20 +46,6 @@ func dumpFileEnv(t *testing.T, name, content string, mtime time.Time) string {
 	return p
 }
 
-// restoreWith builds a restore dir containing the given files (path→content).
-func restoreWith(t *testing.T, files map[string]string) string {
-	t.Helper()
-	dir := t.TempDir()
-	for rel, content := range files {
-		p := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		write(t, p, content)
-	}
-	return dir
-}
-
 const day = 24 * time.Hour
 
 var contractCases = []contractCase{
@@ -130,12 +116,12 @@ var contractCases = []contractCase{
 		return PathExists{Path: "config/config.php"}, CheckEnv{RestoreDir: t.TempDir(), Now: now}
 	}},
 	{kind: kindPathExists, name: "present/pass", want: Pass, build: func(t *testing.T) (Check, CheckEnv) {
-		dir := restoreWith(t, map[string]string{"config/config.php": "<?php"})
+		dir := restoreDir(t, map[string]string{"config/config.php": "<?php"})
 		return PathExists{Path: "config/config.php"}, CheckEnv{RestoreDir: dir, Now: now}
 	}},
 
 	{kind: kindPathAbsent, name: "present/fail", want: Fail, build: func(t *testing.T) (Check, CheckEnv) {
-		dir := restoreWith(t, map[string]string{"leftover.tmp": "x"})
+		dir := restoreDir(t, map[string]string{"leftover.tmp": "x"})
 		return PathAbsent{Path: "leftover.tmp"}, CheckEnv{RestoreDir: dir, Now: now}
 	}},
 	{kind: kindPathAbsent, name: "absent/pass", want: Pass, build: func(t *testing.T) (Check, CheckEnv) {
@@ -146,16 +132,16 @@ var contractCases = []contractCase{
 		return CanaryFile{Path: "canary"}, CheckEnv{RestoreDir: t.TempDir(), Now: now}
 	}},
 	{kind: kindCanaryFile, name: "present/pass-weak", want: Pass, weak: true, build: func(t *testing.T) (Check, CheckEnv) {
-		dir := restoreWith(t, map[string]string{"canary": "ok"})
+		dir := restoreDir(t, map[string]string{"canary": "ok"})
 		return CanaryFile{Path: "canary"}, CheckEnv{RestoreDir: dir, Now: now}
 	}},
 
 	{kind: kindHashMatch, name: "mismatch/fail", want: Fail, build: func(t *testing.T) (Check, CheckEnv) {
-		dir := restoreWith(t, map[string]string{"a.txt": "hello"})
+		dir := restoreDir(t, map[string]string{"a.txt": "hello"})
 		return HashMatch{Manifest: map[string]string{"a.txt": sha256Hex("not hello")}}, CheckEnv{RestoreDir: dir, Now: now}
 	}},
 	{kind: kindHashMatch, name: "match/pass", want: Pass, build: func(t *testing.T) (Check, CheckEnv) {
-		dir := restoreWith(t, map[string]string{"a.txt": "hello"})
+		dir := restoreDir(t, map[string]string{"a.txt": "hello"})
 		return HashMatch{Manifest: map[string]string{"a.txt": sha256Hex("hello")}}, CheckEnv{RestoreDir: dir, Now: now}
 	}},
 	{kind: kindHashMatch, name: "engine-verified-empty-manifest/pass", want: Pass, build: func(t *testing.T) (Check, CheckEnv) {

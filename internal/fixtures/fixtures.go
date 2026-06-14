@@ -7,6 +7,7 @@
 package fixtures
 
 import (
+	"bytes"
 	"compress/gzip"
 	"io"
 	"os"
@@ -116,4 +117,36 @@ func writeCompressed(t *testing.T, path, body string) {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// GzipBytes returns body gzip-compressed, for building hand-mutated corrupt
+// fixtures (truncate or flip a byte, then feed the result to DumpRaw).
+func GzipBytes(t *testing.T, body string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	if _, err := io.WriteString(w, body); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// ZstdBytes returns body zstd-compressed.
+func ZstdBytes(t *testing.T, body string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w, err := zstd.NewWriter(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(w, body); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }

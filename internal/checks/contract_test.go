@@ -87,6 +87,10 @@ var contractCases = []contractCase{
 	{kind: kindMaxAge, name: "just-inside-window/pass", want: Pass, build: func(t *testing.T) (Check, CheckEnv) {
 		return MaxAge{Path: dumpFileEnv(t, "dump.sql.gz", "x", now.Add(-35*time.Hour)), Max: 36 * time.Hour}, CheckEnv{Now: now}
 	}},
+	{kind: kindMaxAge, name: "exact-boundary/pass", want: Pass, build: func(t *testing.T) (Check, CheckEnv) {
+		// age == Max must pass: the window is inclusive (`<=`), not `<`.
+		return MaxAge{Path: dumpFileEnv(t, "dump.sql.gz", "x", now.Add(-36*time.Hour)), Max: 36 * time.Hour}, CheckEnv{Now: now}
+	}},
 	{kind: kindMaxAge, name: "missing/error", want: Error, build: func(t *testing.T) (Check, CheckEnv) {
 		return MaxAge{Path: filepath.Join(t.TempDir(), "missing"), Max: time.Hour}, CheckEnv{Now: now}
 	}},
@@ -97,6 +101,9 @@ var contractCases = []contractCase{
 	}},
 	{kind: kindSnapshotMaxAge, name: "just-inside-window/pass", want: Pass, build: func(_ *testing.T) (Check, CheckEnv) {
 		return SnapshotMaxAge{Newest: now.Add(-35 * time.Hour), Max: 36 * time.Hour}, CheckEnv{Now: now}
+	}},
+	{kind: kindSnapshotMaxAge, name: "exact-boundary/pass", want: Pass, build: func(_ *testing.T) (Check, CheckEnv) {
+		return SnapshotMaxAge{Newest: now.Add(-36 * time.Hour), Max: 36 * time.Hour}, CheckEnv{Now: now}
 	}},
 	{kind: kindSnapshotMaxAge, name: "no-snapshots/error", want: Error, build: func(_ *testing.T) (Check, CheckEnv) {
 		return SnapshotMaxAge{Max: 36 * time.Hour}, CheckEnv{Now: now}
@@ -156,6 +163,9 @@ var contractCases = []contractCase{
 	}},
 	{kind: kindNewestFileMaxAge, name: "just-inside-window/pass", want: Pass, build: func(_ *testing.T) (Check, CheckEnv) {
 		return NewestFileMaxAge{Newest: now.Add(-8*day + time.Hour), Max: 8 * day}, CheckEnv{Now: now}
+	}},
+	{kind: kindNewestFileMaxAge, name: "exact-boundary/pass", want: Pass, build: func(_ *testing.T) (Check, CheckEnv) {
+		return NewestFileMaxAge{Newest: now.Add(-8 * day), Max: 8 * day}, CheckEnv{Now: now}
 	}},
 	{kind: kindNewestFileMaxAge, name: "nothing-restored/error", want: Error, build: func(_ *testing.T) (Check, CheckEnv) {
 		return NewestFileMaxAge{Max: 8 * day}, CheckEnv{Now: now}

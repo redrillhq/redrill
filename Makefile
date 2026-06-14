@@ -7,7 +7,7 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build test test-integration test-sabotage test-flake test-fuzz lint fmt clean
+.PHONY: build test test-integration test-sabotage test-flake test-fuzz test-mutation lint fmt clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/redrill ./cmd/redrill
@@ -42,6 +42,19 @@ test-fuzz:
 	go test -run=^$$ -fuzz=^FuzzParse$$ -fuzztime=$(FUZZTIME) ./internal/config/
 	go test -run=^$$ -fuzz=^FuzzStageDump$$ -fuzztime=$(FUZZTIME) ./internal/exec/
 	go test -run=^$$ -fuzz=^FuzzRedactNoSecretSurvives$$ -fuzztime=$(FUZZTIME) ./internal/redact/
+
+# Mutation testing of the pure-logic verifier packages (checks, config) — where
+# unit tests are the complete coverage; engine glue is integration-tested, out of
+# reach here. Run periodically, not per-push (it is slow). workers=1 avoids CPU
+# contention that inflates timeouts; the testcache is cleared so gremlins
+# calibrates its per-mutant timeout against a real (uncached) baseline.
+GREMLINS_VERSION := v0.6.0
+MUTATION_FLOOR ?= 80
+GREMLINS := go run github.com/go-gremlins/gremlins/cmd/gremlins@$(GREMLINS_VERSION) unleash --workers 1 --timeout-coefficient 5 --threshold-efficacy $(MUTATION_FLOOR)
+test-mutation:
+	go clean -testcache
+	$(GREMLINS) ./internal/checks
+	$(GREMLINS) ./internal/config
 
 lint:
 	$(GOLANGCI_LINT) run

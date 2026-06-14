@@ -1,0 +1,16 @@
+# run against a missing config → config error
+! redrill run app-db -c does-not-exist.yaml
+stderr 'invalid'
+
+# run an unknown drill → infra error, message names the drill
+! redrill run ghost -c valid.yaml
+stderr 'no drill named'
+
+-- valid.yaml --
+version: 1
+data_dir: /var/lib/redrill
+scratch: {dir: /var/lib/redrill/scratch}
+sources:
+  - {name: dumps, type: dumpdir, path: /backups, pattern: "*.sql.gz"}
+drills:
+  - {name: app-db, source: dumps, schedule: "@daily", levels: {l1: {file_min_bytes: 1}}}

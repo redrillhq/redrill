@@ -10,6 +10,7 @@ require (
 	github.com/klauspost/compress v1.18.6
 	github.com/nicholas-fedor/shoutrrr v0.16.1
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/rogpeppe/go-internal v1.15.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.52.0
 )
@@ -50,6 +51,7 @@ require (
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/tools v0.45.0 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

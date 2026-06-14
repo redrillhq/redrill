@@ -1,0 +1,7 @@
+# version prints to stdout and succeeds
+redrill version
+stdout 'redrill'
+
+# --json emits machine-readable fields
+redrill version --json
+stdout '"version"'

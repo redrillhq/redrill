@@ -37,7 +37,7 @@ func TestIntegrationBorgL1L2(t *testing.T) {
 func TestIntegrationDumpdirL3(t *testing.T) {
 	rt := requireDocker(t)
 	dir := fixtures.Dump(t, fixtures.DumpBody("CREATE TABLE users(id int);\nINSERT INTO users VALUES (1),(2),(3);\n"))
-	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
+	res := runL3Drill(t, rt, dir, pgImage(), []config.Check{
 		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
 		{Kind: "sql_no_error", SQLNoError: "select * from users limit 1"},
 	})
@@ -52,7 +52,7 @@ func TestIntegrationDumpdirL3(t *testing.T) {
 func TestIntegrationDumpdirL3OlderMajorLoads(t *testing.T) {
 	rt := requireDocker(t)
 	dir := fixtures.Dump(t, fixtures.DumpBody("-- Dumped from database version 14\nCREATE TABLE users(id int);\nINSERT INTO users VALUES (1),(2),(3);\n"))
-	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
+	res := runL3Drill(t, rt, dir, pgImage(), []config.Check{
 		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
 	})
 	if res.Status != store.ResultPass {
@@ -79,7 +79,7 @@ func TestIntegrationBorgL3(t *testing.T) {
 	rt := requireDocker(t)
 	repo, passFile := fixtures.Borg(t, fixtures.BorgFile("db.dump",
 		"CREATE TABLE users(id int);\nINSERT INTO users VALUES (1),(2),(3);\n"))
-	res := runBorgL3Drill(t, rt, repo, passFile, "db.dump", "postgres:16", []config.Check{
+	res := runBorgL3Drill(t, rt, repo, passFile, "db.dump", pgImage(), []config.Check{
 		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
 		{Kind: "sql_no_error", SQLNoError: "select * from users limit 1"},
 	})

@@ -112,7 +112,7 @@ func TestSabotageMissingDataDir(t *testing.T) {
 func TestSabotageWrongDBDump(t *testing.T) {
 	rt := requireDocker(t)
 	dir := fixtures.Dump(t, fixtures.DumpBody("CREATE TABLE users(id int);\n")) // table exists, but no rows
-	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
+	res := runL3Drill(t, rt, dir, pgImage(), []config.Check{
 		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
 	})
 	mustFail(t, res, "wrong-db-dump")
@@ -123,7 +123,7 @@ func TestSabotageWrongDBDump(t *testing.T) {
 func TestSabotageVersionTrap(t *testing.T) {
 	rt := requireDocker(t)
 	dir := fixtures.Dump(t, fixtures.DumpBody("-- Dumped from database version 99.0\nCREATE TABLE users(id int);\nINSERT INTO users VALUES (1);\n"))
-	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
+	res := runL3Drill(t, rt, dir, pgImage(), []config.Check{
 		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
 	})
 	mustFail(t, res, "version-trap")

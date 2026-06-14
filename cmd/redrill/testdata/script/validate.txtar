@@ -1,0 +1,59 @@
+# a valid config validates (exit 0)
+redrill validate -c valid.yaml
+stdout 'is valid'
+
+# --json form
+redrill validate -c valid.yaml --json
+stdout '"valid": true'
+
+# unknown key → config error (exit 3), message names the file as invalid
+! redrill validate -c unknown.yaml
+stderr 'is invalid'
+
+# a drill referencing a missing source → config error
+! redrill validate -c badref.yaml
+stderr 'no such source'
+
+# a bad schedule is caught at the CLI (config is a leaf, can't reach the parser)
+! redrill validate -c badsched.yaml
+stderr 'schedule'
+
+# a missing config file → config error
+! redrill validate -c does-not-exist.yaml
+stderr 'invalid'
+
+-- valid.yaml --
+version: 1
+data_dir: /var/lib/redrill
+scratch: {dir: /var/lib/redrill/scratch}
+sources:
+  - {name: dumps, type: dumpdir, path: /backups, pattern: "*.sql.gz"}
+drills:
+  - name: app-db
+    source: dumps
+    schedule: "Sun 05:00"
+    max_proof_age: 10d
+    levels:
+      l1: {file_min_bytes: 1MiB, compression_test: true, max_age: 36h}
+
+-- unknown.yaml --
+version: 1
+data_dir: /v
+scratch: {dir: /s}
+bogus_key: nope
+
+-- badref.yaml --
+version: 1
+data_dir: /v
+scratch: {dir: /s}
+drills:
+  - {name: d, source: ghost, schedule: "@daily", levels: {l1: {file_min_bytes: 1}}}
+
+-- badsched.yaml --
+version: 1
+data_dir: /v
+scratch: {dir: /s}
+sources:
+  - {name: dumps, type: dumpdir, path: /b, pattern: "*.gz"}
+drills:
+  - {name: d, source: dumps, schedule: "not a schedule", levels: {l1: {file_min_bytes: 1}}}

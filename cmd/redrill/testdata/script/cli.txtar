@@ -1,0 +1,12 @@
+# help prints usage and succeeds
+redrill help
+stdout 'Usage:'
+stdout 'Exit codes'
+
+# no args → usage on stderr, non-zero exit
+! redrill
+stderr 'Usage:'
+
+# unknown command → non-zero exit, names the command
+! redrill bogus
+stderr 'unknown command'

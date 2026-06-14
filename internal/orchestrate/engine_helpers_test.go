@@ -102,6 +102,15 @@ func requireDocker(t *testing.T) *docker.Runtime {
 	return rt
 }
 
+// pgImage is the Postgres image the L3 tests boot; override via
+// REDRILL_TEST_PG_IMAGE so CI can matrix across majors (postgres:14..17).
+func pgImage() string {
+	if img := os.Getenv("REDRILL_TEST_PG_IMAGE"); img != "" {
+		return img
+	}
+	return "postgres:16"
+}
+
 func runL3Drill(t *testing.T, rt *docker.Runtime, dir, image string, cfgChecks []config.Check) RunResult {
 	t.Helper()
 	st := newStore(t)

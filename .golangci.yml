@@ -87,6 +87,12 @@ linters:
       - path: _test\.go
         linters:
           - gosec
+      # internal/fixtures is a test-only fixture builder (subprocess + temp
+      # files); gosec there is the same noise as on _test.go, and nothing in
+      # the binary links it.
+      - path: ^internal/fixtures/
+        linters:
+          - gosec
 
 formatters:
   enable:

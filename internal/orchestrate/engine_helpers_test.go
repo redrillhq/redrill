@@ -3,12 +3,9 @@
 package orchestrate
 
 import (
-	"compress/gzip"
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,68 +15,10 @@ import (
 )
 
 // Shared real-engine scaffolding for the integration happy-path drills and the
-// sabotage fixtures. Built under either tag so both suites can use it.
+// sabotage fixtures. The backups themselves are built by internal/fixtures; this
+// file holds drill construction, the run helpers, and runtime gating.
 
 // --- borg ---
-
-func requireBorg(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("borg"); err != nil {
-		t.Skip("borg not installed; provide borg to run engine fixtures")
-	}
-}
-
-func mkdirAll(t *testing.T, p string) {
-	t.Helper()
-	if err := os.MkdirAll(p, 0o755); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func writeFile(t *testing.T, p, body string) {
-	t.Helper()
-	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func runBorgSetup(t *testing.T, dir string, env []string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("borg", args...)
-	cmd.Dir = dir
-	cmd.Env = env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("borg %v: %v\n%s", args, err, out)
-	}
-}
-
-// buildBorgRepo creates a repo with a config/ tree and, unless omitData, a data/
-// tree (omitting it models missing-data-dir, a bad exclude). archiveAge>0
-// backdates the archive via --timestamp (stale-source).
-func buildBorgRepo(t *testing.T, omitData bool, archiveAge time.Duration) (repo, passFile string) {
-	t.Helper()
-	dir := t.TempDir()
-	repo = filepath.Join(dir, "repo")
-	src := filepath.Join(dir, "src")
-	mkdirAll(t, filepath.Join(src, "config"))
-	writeFile(t, filepath.Join(src, "config", "config.php"), "<?php // fixture")
-	if !omitData {
-		mkdirAll(t, filepath.Join(src, "data", "docs"))
-		writeFile(t, filepath.Join(src, "data", "docs", "a.txt"), strings.Repeat("payload\n", 200))
-	}
-	passFile = filepath.Join(dir, "pass")
-	writeFile(t, passFile, "testpass")
-
-	env := append(os.Environ(), "BORG_PASSPHRASE=testpass")
-	runBorgSetup(t, dir, env, "init", "--encryption=repokey", repo)
-	args := []string{"create"}
-	if archiveAge > 0 {
-		args = append(args, "--timestamp", time.Now().UTC().Add(-archiveAge).Format("2006-01-02T15:04:05"))
-	}
-	args = append(args, repo+"::arch1", ".")
-	runBorgSetup(t, src, env, args...)
-	return repo, passFile
-}
 
 func borgSource(repo, passFile string) config.Source {
 	return config.Source{Name: "borg1", Type: "borg", Repo: repo, PassphraseFile: passFile}
@@ -161,27 +100,6 @@ func requireDocker(t *testing.T) *docker.Runtime {
 	}
 	t.Cleanup(func() { _ = rt.Close() })
 	return rt
-}
-
-// sqlDumpdir writes body as a gzipped SQL dump in a fresh dumpdir.
-func sqlDumpdir(t *testing.T, body string) string {
-	t.Helper()
-	dir := t.TempDir()
-	f, err := os.Create(filepath.Join(dir, "app.sql.gz"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	gz := gzip.NewWriter(f)
-	if _, err := gz.Write([]byte(body)); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return dir
 }
 
 func runL3Drill(t *testing.T, rt *docker.Runtime, dir, image string, cfgChecks []config.Check) RunResult {

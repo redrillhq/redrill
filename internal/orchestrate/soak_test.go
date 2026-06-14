@@ -7,6 +7,7 @@ import (
 
 	"github.com/alyamovsky/redrill/internal/config"
 	"github.com/alyamovsky/redrill/internal/exec"
+	"github.com/alyamovsky/redrill/internal/fixtures"
 	"github.com/alyamovsky/redrill/internal/scheduler"
 	"github.com/alyamovsky/redrill/internal/store"
 )
@@ -29,8 +30,7 @@ func soakDrill(dir string, ret config.Retention) (config.Drill, config.Source) {
 func TestRetentionAndWeeklyCadence(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base)
+	dir := fixtures.Dump(t)
 	st := newStore(t)
 
 	const keep = 4
@@ -105,8 +105,7 @@ func TestRetentionAndWeeklyCadence(t *testing.T) {
 func TestRetentionByAgeWiring(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base)
+	dir := fixtures.Dump(t)
 	st := newStore(t)
 
 	const daydur = 24 * time.Hour

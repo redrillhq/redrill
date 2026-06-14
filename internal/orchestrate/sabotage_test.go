@@ -9,26 +9,15 @@ import (
 
 	"github.com/alyamovsky/redrill/internal/checks"
 	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/alyamovsky/redrill/internal/fixtures"
 	"github.com/alyamovsky/redrill/internal/store"
 )
 
-// The sabotage kit: each fixture is a "perfect cron,
-// dead backup" that engines' own checks pass and redrill must flag. Every test
-// asserts the exact verdict (fail — a bad backup, never error) and the catching
-// check. Engine-backed fixtures skip when borg or Docker is absent; the
-// maintainer's CI provides both, so the gate blocks there.
-//
-// mtime-dependent fixtures are built here, not committed, because git drops mtime.
-
-func writeRaw(t *testing.T, path, content string, mtime time.Time) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(path, mtime, mtime); err != nil {
-		t.Fatal(err)
-	}
-}
+// The sabotage kit: each fixture is a "perfect cron, dead backup" that engines'
+// own checks pass and redrill must flag. Every test asserts the exact verdict
+// (fail — a bad backup, never error) and the catching check. Engine-backed
+// fixtures skip when borg or Docker is absent; the maintainer's CI provides
+// both, so the gate blocks there.
 
 // mustFail asserts the run flagged a bad backup (fail), keeping fail distinct
 // from error (the auditor's own problem).
@@ -60,8 +49,7 @@ func assertCaught(t *testing.T, res RunResult, byKinds ...string) {
 // empty-dump: a 0-byte file with a plausible name and fresh mtime (dumpdir L1).
 func TestSabotageEmptyDump(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	writeRaw(t, dir+"/app-1.sql.gz", "", base)
+	dir := fixtures.Dump(t, fixtures.DumpRaw(nil))
 	st := newStore(t)
 	drill, src := drillFor(dir, l1Full())
 
@@ -73,8 +61,7 @@ func TestSabotageEmptyDump(t *testing.T) {
 // stale-source (dumpdir L1 max_age): a valid dump 30 days old.
 func TestSabotageStaleSourceDumpdir(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1; -- a perfectly valid dump", base.Add(-30*24*time.Hour))
+	dir := fixtures.Dump(t, fixtures.DumpBody("SELECT 1; -- a perfectly valid dump"), fixtures.DumpAge(30*24*time.Hour))
 	st := newStore(t)
 	drill, src := drillFor(dir, l1Full())
 
@@ -85,8 +72,8 @@ func TestSabotageStaleSourceDumpdir(t *testing.T) {
 
 // stale-source (borg L1 snapshot_max_age): newest archive 30 days old.
 func TestSabotageStaleSourceBorg(t *testing.T) {
-	requireBorg(t)
-	repo, passFile := buildBorgRepo(t, false, 30*24*time.Hour)
+	fixtures.RequireBorg(t)
+	repo, passFile := fixtures.Borg(t, fixtures.BorgArchiveAge(30*24*time.Hour))
 	res := runBorgDrill(t, repo, passFile, borgStaleDrill())
 	mustFail(t, res, "stale-source (borg)")
 	assertCaught(t, res, "snapshot_max_age")
@@ -95,8 +82,8 @@ func TestSabotageStaleSourceBorg(t *testing.T) {
 // truncated-segment (borg L1 native check): the one corruption engines catch —
 // proves redrill delegates integrity to borg check correctly.
 func TestSabotageTruncatedSegment(t *testing.T) {
-	requireBorg(t)
-	repo, passFile := buildBorgRepo(t, false, 0)
+	fixtures.RequireBorg(t)
+	repo, passFile := fixtures.Borg(t)
 
 	seg := largestFile(t, repo+"/data")
 	info, err := os.Stat(seg)
@@ -114,8 +101,8 @@ func TestSabotageTruncatedSegment(t *testing.T) {
 
 // missing-data-dir (borg L2 path_exists): a bad exclude dropped data/.
 func TestSabotageMissingDataDir(t *testing.T) {
-	requireBorg(t)
-	repo, passFile := buildBorgRepo(t, true, 0)
+	fixtures.RequireBorg(t)
+	repo, passFile := fixtures.Borg(t, fixtures.BorgOmitData())
 	res := runBorgDrill(t, repo, passFile, borgL1L2Drill())
 	mustFail(t, res, "missing-data-dir")
 	assertCaught(t, res, "path_exists")
@@ -124,7 +111,7 @@ func TestSabotageMissingDataDir(t *testing.T) {
 // wrong-db-dump (dumpdir L3 sql): a valid dump of the wrong/empty database.
 func TestSabotageWrongDBDump(t *testing.T) {
 	rt := requireDocker(t)
-	dir := sqlDumpdir(t, "CREATE TABLE users(id int);\n") // table exists, but no rows
+	dir := fixtures.Dump(t, fixtures.DumpBody("CREATE TABLE users(id int);\n")) // table exists, but no rows
 	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
 		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
 	})
@@ -135,7 +122,7 @@ func TestSabotageWrongDBDump(t *testing.T) {
 // version-trap (dumpdir L3 load): a dump needing a newer pg major than the sandbox.
 func TestSabotageVersionTrap(t *testing.T) {
 	rt := requireDocker(t)
-	dir := sqlDumpdir(t, "-- Dumped from database version 99.0\nCREATE TABLE users(id int);\nINSERT INTO users VALUES (1);\n")
+	dir := fixtures.Dump(t, fixtures.DumpBody("-- Dumped from database version 99.0\nCREATE TABLE users(id int);\nINSERT INTO users VALUES (1);\n"))
 	res := runL3Drill(t, rt, dir, "postgres:16", []config.Check{
 		{Kind: "sql", SQL: &config.SQLCheck{Query: "select count(*) from users", Expect: "> 0"}},
 	})

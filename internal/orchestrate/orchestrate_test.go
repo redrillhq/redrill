@@ -1,9 +1,7 @@
 package orchestrate
 
 import (
-	"compress/gzip"
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,32 +9,11 @@ import (
 
 	"github.com/alyamovsky/redrill/internal/config"
 	"github.com/alyamovsky/redrill/internal/exec"
+	"github.com/alyamovsky/redrill/internal/fixtures"
 	"github.com/alyamovsky/redrill/internal/store"
 )
 
-var base = time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
-
-func makeGz(t *testing.T, dir, name, body string, mtime time.Time) {
-	t.Helper()
-	p := filepath.Join(dir, name)
-	f, err := os.Create(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gz := gzip.NewWriter(f)
-	if _, err := gz.Write([]byte(body)); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(p, mtime, mtime); err != nil {
-		t.Fatal(err)
-	}
-}
+var base = fixtures.Epoch
 
 func newStore(t *testing.T) *store.Store {
 	t.Helper()
@@ -73,8 +50,7 @@ func runDrill(t *testing.T, st *store.Store, drill config.Drill, src config.Sour
 func TestRunPassWritesEvidenceAndProof(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-1*time.Hour))
+	dir := fixtures.Dump(t, fixtures.DumpAge(time.Hour))
 	st := newStore(t)
 	drill, src := drillFor(dir, l1Full())
 
@@ -116,8 +92,7 @@ func TestRunPassWritesEvidenceAndProof(t *testing.T) {
 func TestRunFailOnStaleNoProof(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-30*24*time.Hour)) // stale
+	dir := fixtures.Dump(t, fixtures.DumpAge(30*24*time.Hour)) // stale
 	st := newStore(t)
 	drill, src := drillFor(dir, l1Full())
 
@@ -148,8 +123,7 @@ func TestRunErrorOnUnreadableDir(t *testing.T) {
 
 func TestRunShortCircuitsHigherLevels(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-30*24*time.Hour)) // stale
+	dir := fixtures.Dump(t, fixtures.DumpAge(30*24*time.Hour)) // stale
 	levels := l1Full()
 	levels.L3 = &config.L3{} // configured but unimplemented
 
@@ -178,8 +152,7 @@ func TestRunShortCircuitsHigherLevels(t *testing.T) {
 func TestRunNoSandboxRuntimeSkipsL3(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-1*time.Hour))
+	dir := fixtures.Dump(t, fixtures.DumpAge(time.Hour))
 	levels := l1Full()
 	levels.L3 = &config.L3{Sandbox: config.Sandbox{Image: "postgres:16"}}
 	st := newStore(t)
@@ -226,8 +199,7 @@ func (c *cancelingExec) RunStep(ctx context.Context, step exec.StepSpec) (exec.S
 // error — never leave a zombie with a NULL result.
 func TestRunFinalizesOnMidRunError(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-1*time.Hour))
+	dir := fixtures.Dump(t, fixtures.DumpAge(time.Hour))
 	st := newStore(t)
 	drill, src := drillFor(dir, l1Full())
 
@@ -263,8 +235,7 @@ func TestRunLevelFilterUnknownLevel(t *testing.T) {
 
 func TestRunReportStreamsPerLevel(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	makeGz(t, dir, "app-1.sql.gz", "SELECT 1;", base.Add(-1*time.Hour))
+	dir := fixtures.Dump(t, fixtures.DumpAge(time.Hour))
 	st := newStore(t)
 	drill, src := drillFor(dir, l1Full())
 

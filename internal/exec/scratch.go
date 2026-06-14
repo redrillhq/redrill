@@ -50,5 +50,18 @@ func freeBytes(path string) (uint64, error) {
 	if err := syscall.Statfs(path, &st); err != nil {
 		return 0, fmt.Errorf("statfs %s: %w", path, err)
 	}
-	return st.Bavail * uint64(st.Bsize), nil
+	// syscall.Statfs_t.Bsize is signed on Linux but unsigned on darwin; route the
+	// unsigned conversion through one guarded helper (int64 is a widening on
+	// darwin, a no-op on Linux) so it lints clean — gosec G115 — on every platform.
+	return availableBytes(st.Bavail, int64(st.Bsize)), nil
+}
+
+// availableBytes multiplies a free-block count by its block size. A filesystem
+// block size is never negative; the guard keeps the unsigned conversion
+// overflow-safe.
+func availableBytes(blocks uint64, blockSize int64) uint64 {
+	if blockSize <= 0 {
+		return 0
+	}
+	return blocks * uint64(blockSize)
 }

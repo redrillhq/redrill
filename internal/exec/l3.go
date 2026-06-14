@@ -19,7 +19,6 @@ import (
 	"github.com/alyamovsky/redrill/internal/checks"
 	"github.com/alyamovsky/redrill/internal/config"
 	"github.com/alyamovsky/redrill/internal/driver"
-	"github.com/alyamovsky/redrill/internal/driver/borg"
 	"github.com/alyamovsky/redrill/internal/driver/dumpdir"
 	"github.com/alyamovsky/redrill/internal/redact"
 	"github.com/alyamovsky/redrill/internal/sandbox"
@@ -70,10 +69,7 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 	}
 	red := redact.New()
 	red.AddSecret(passphrase)
-	d := borg.New(src.Repo,
-		borg.WithBinary(src.Binary), borg.WithPassphrase(passphrase),
-		borg.WithSSHKey(src.SSHKeyFile), borg.WithRunner(e.borgRunner),
-	)
+	d := e.newBorg(src, passphrase)
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}

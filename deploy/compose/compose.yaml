@@ -1,0 +1,27 @@
+# Example redrill deployment. Point the volumes at your backups (read-only) and
+# secrets, then:  docker compose up -d
+#
+# L3 (database sandbox) drills need the host container runtime, hence the docker
+# socket mount — the documented trust tradeoff. Drop it if you only run L1/L2;
+# L3 then degrades to "skipped", never a silent pass.
+services:
+  redrill:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    # Or pin a released image instead of building from source:
+    # image: ghcr.io/alyamovsky/redrill:latest
+    container_name: redrill
+    restart: unless-stopped
+    command: ["serve", "-c", "/etc/redrill/config.yaml"]
+    volumes:
+      - ./config.example.yaml:/etc/redrill/config.yaml:ro
+      - redrill-data:/var/lib/redrill                 # sqlite store + scratch
+      - /var/run/docker.sock:/var/run/docker.sock     # L3 sandboxes (see note above)
+      # Expose the backups to audit, read-only:
+      # - /backups/pg:/backups/pg:ro
+      # Secrets as files (borg passphrase, read-only ssh key):
+      # - ./secrets:/etc/redrill/secrets:ro
+
+volumes:
+  redrill-data:

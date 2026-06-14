@@ -1,0 +1,37 @@
+# Minimal redrill config for the compose example. The full schema and a complete
+# dogfood config live in the project docs. Secrets are *_file / *_env only.
+version: 1
+data_dir: /var/lib/redrill
+scratch:
+  dir: /var/lib/redrill/scratch
+  max_bytes: 40GiB
+concurrency: 1
+
+# Best-effort IO discipline applied to spawned engine processes.
+nice: { cpu: 10, io_class: idle }
+bandwidth_limit: 40MiB
+
+notify:
+  urls:
+    - "ntfy://ntfy.example.com/redrill"   # any shoutrrr URL: ntfy, telegram, discord, email, webhook...
+  events: [fail, error, recover, stale]
+
+sources:
+  - name: pg-dumps
+    type: dumpdir
+    path: /backups/pg            # mount this read-only into the container
+    pattern: "*.sql.gz"
+    pick: newest
+
+drills:
+  - name: app-db
+    source: pg-dumps
+    schedule: "Sun 05:00"        # cron or human shorthand; plus jitter
+    max_proof_age: 10d           # stale alert if no proof newer than this
+    levels:
+      l1: { file_min_bytes: 1MiB, compression_test: true, max_age: 36h }
+      l3:
+        sandbox: { image: postgres:16, network: none, memory: 1GiB, timeout: 20m }
+        load: auto
+        checks:
+          - sql: { query: "select count(*) from users", expect: "> 0" }

@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/alyamovsky/redrill/internal/config"
 	"github.com/alyamovsky/redrill/internal/exec"
+	"github.com/alyamovsky/redrill/internal/notify"
 	"github.com/alyamovsky/redrill/internal/orchestrate"
 	"github.com/alyamovsky/redrill/internal/sandbox/docker"
 	"github.com/alyamovsky/redrill/internal/scheduler"
@@ -34,7 +36,7 @@ func runServe(args []string, _, stderr io.Writer) int {
 
 	cfg, err := config.Load(*path)
 	if err == nil {
-		err = checkSchedules(cfg)
+		err = extraValidate(cfg)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "redrill: %s is invalid:\n%v\n", *path, err)
@@ -63,12 +65,20 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 	}
 	defer func() { _ = st.Close() }()
 
-	executor := buildExecutor(startCtx, log)
+	notifier, err := notify.New(cfg.Notify.URLs, cfg.Notify.Events, log)
+	if err != nil {
+		log.Error("invalid notify config", "error", err.Error())
+		return 3
+	}
+
+	clock := func() time.Time { return time.Now().UTC() }
+	executor := buildExecutor(startCtx, cfg, log)
 	if executor.sandbox != nil {
 		defer func() { _ = executor.sandbox.Close() }()
 	}
 
-	o := orchestrate.New(st, executor.local, func() time.Time { return time.Now().UTC() })
+	o := orchestrate.New(st, executor.local, clock)
+	al := newAlerter(notifier, st, cfg.Drills, clock)
 	runFunc := func(rctx context.Context, d config.Drill) error {
 		src, ok := findSource(cfg, d.Source)
 		if !ok {
@@ -80,6 +90,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 		}
 		log.Info("drill finished", "drill", d.Name, "result", string(res.Status),
 			"level", res.LevelReached, "run_id", res.RunID)
+		al.afterRun(rctx, d, res)
 		return nil
 	}
 
@@ -89,9 +100,18 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 		return 3
 	}
 
+	// The staleness sweeper runs alongside the scheduler; both stop on ctx cancel.
+	var wg sync.WaitGroup
+	if al.active() {
+		wg.Add(1)
+		go func() { defer wg.Done(); al.runSweeps(ctx) }()
+	}
+
 	log.Info("redrill serving", "drills", len(cfg.Drills), "concurrency", cfg.Concurrency)
-	if err := sched.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Error("scheduler stopped with error", "error", err.Error())
+	runErr := sched.Run(ctx)
+	wg.Wait()
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		log.Error("scheduler stopped with error", "error", runErr.Error())
 		return 2
 	}
 	log.Info("redrill stopped")
@@ -105,10 +125,11 @@ type executorBundle struct {
 }
 
 // buildExecutor wires the Docker sandbox when a container engine is reachable,
-// else L3 skips; the janitor reaps containers left by crashed runs.
-func buildExecutor(ctx context.Context, log *slog.Logger) executorBundle {
+// else L3 skips; the janitor reaps containers left by crashed runs. The IO policy
+// (nice/ionice/bandwidth) is applied to every spawned engine.
+func buildExecutor(ctx context.Context, cfg *config.Config, log *slog.Logger) executorBundle {
 	host, _ := os.Hostname()
-	local := exec.NewLocal(host)
+	local := exec.NewLocal(host).WithIOPolicy(ioPolicy(cfg))
 	rt, err := docker.NewRuntime(ctx)
 	if err != nil {
 		log.Info("no container runtime reachable; L3 drills will be skipped", "error", err.Error())

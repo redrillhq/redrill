@@ -44,6 +44,7 @@ Commands:
   status     show each drill's last run, proof age, next run, and SLA state
   history    show a drill's past runs
   serve      run the scheduler daemon
+  doctor     check the environment: engines, container runtime, scratch, repos
   version    print version information
 
 Exit codes: 0 ok · 1 drill fail · 2 infra error · 3 config error
@@ -69,6 +70,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runHistory(args[1:], stdout, stderr)
 	case "serve":
 		return runServe(args[1:], stdout, stderr)
+	case "doctor":
+		return runDoctor(args[1:], stdout, stderr)
 	case "version":
 		return runVersion(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -121,8 +124,9 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := config.Load(*path)
 	if err == nil {
-		// config is a leaf and can't reach the scheduler grammar, so check schedules here.
-		err = checkSchedules(cfg)
+		// config is a leaf and can't reach the scheduler grammar or shoutrrr, so
+		// check schedules and notify URLs here.
+		err = extraValidate(cfg)
 	}
 	if err != nil {
 		if *jsonOut {
@@ -205,7 +209,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	defer func() { _ = st.Close() }()
 
 	host, _ := os.Hostname()
-	executor := exec.NewLocal(host)
+	executor := exec.NewLocal(host).WithIOPolicy(ioPolicy(cfg))
 	// Wire the L3 sandbox if a container engine is reachable, else L3 skips.
 	// The janitor reaps orphans from crashed runs.
 	if rt, rerr := docker.NewRuntime(ctx); rerr == nil {

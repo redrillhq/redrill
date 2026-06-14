@@ -1,0 +1,5 @@
+redrill: nextcloud-db restore FAILED
+
+nextcloud-db: L3 FAILED — sql oc_users: expected > 0, got 0.
+Your backup is the problem — a check found bad data.
+Last good proof: 2026-05-24 12:00 UTC (21d ago).

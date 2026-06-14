@@ -62,6 +62,7 @@ type LocalExecutor struct {
 	host       string
 	borgRunner borg.Runner            // nil = the real borg binary; tests inject a fake
 	sandbox    sandbox.SandboxRuntime // nil = no L3 runtime → L3 skipped
+	io         IOPolicy
 }
 
 func NewLocal(host string) *LocalExecutor { return &LocalExecutor{host: host} }
@@ -70,6 +71,27 @@ func NewLocal(host string) *LocalExecutor { return &LocalExecutor{host: host} }
 func (e *LocalExecutor) WithSandbox(rt sandbox.SandboxRuntime) *LocalExecutor {
 	e.sandbox = rt
 	return e
+}
+
+// WithIOPolicy applies nice/ionice and bandwidth limits to spawned engines.
+func (e *LocalExecutor) WithIOPolicy(p IOPolicy) *LocalExecutor {
+	e.io = p
+	return e
+}
+
+// newBorg builds the borg driver with the IO policy applied.
+func (e *LocalExecutor) newBorg(src config.Source, passphrase string) *borg.Driver {
+	base := e.borgRunner
+	if base == nil {
+		base = borg.ExecRunner
+	}
+	return borg.New(src.Repo,
+		borg.WithBinary(src.Binary),
+		borg.WithPassphrase(passphrase),
+		borg.WithSSHKey(src.SSHKeyFile),
+		borg.WithUploadRateLimit(e.io.BandwidthKiB),
+		borg.WithRunner(wrapIOPolicy(base, e.io)),
+	)
 }
 
 func (e *LocalExecutor) Describe() ExecutorInfo { return ExecutorInfo{Host: e.host} }
@@ -92,6 +114,32 @@ func (e *LocalExecutor) RunStep(ctx context.Context, step StepSpec) (StepResult,
 		return e.runBorgL3(ctx, step)
 	default:
 		return StepResult{}, fmt.Errorf("%w: level %q source %q", ErrUnsupported, step.Level, step.Source.Type)
+	}
+}
+
+// ValidateSource checks a source is reachable.
+func ValidateSource(ctx context.Context, src config.Source) error {
+	switch src.Type {
+	case "dumpdir":
+		return dumpdir.New(src.Path, src.Pattern).Validate(ctx)
+	case "borg":
+		passphrase, err := resolveSecret(src.PassphraseFile, src.PassphraseEnv)
+		if err != nil {
+			return err
+		}
+		red := redact.New()
+		red.AddSecret(passphrase)
+		d := borg.New(src.Repo,
+			borg.WithBinary(src.Binary), borg.WithPassphrase(passphrase), borg.WithSSHKey(src.SSHKeyFile),
+		)
+		if err := d.Validate(ctx); err != nil {
+			return errors.New(red.Redact(err.Error()))
+		}
+		return nil
+	case "restic":
+		return fmt.Errorf("%w: source type restic", ErrUnsupported)
+	default:
+		return fmt.Errorf("unknown source type %q", src.Type)
 	}
 }
 
@@ -207,12 +255,7 @@ func (e *LocalExecutor) runBorgL1(ctx context.Context, step StepSpec) (StepResul
 	red := redact.New()
 	red.AddSecret(passphrase)
 
-	d := borg.New(src.Repo,
-		borg.WithBinary(src.Binary),
-		borg.WithPassphrase(passphrase),
-		borg.WithSSHKey(src.SSHKeyFile),
-		borg.WithRunner(e.borgRunner),
-	)
+	d := e.newBorg(src, passphrase)
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
@@ -325,10 +368,7 @@ func (e *LocalExecutor) runBorgL2(ctx context.Context, step StepSpec) (StepResul
 	red := redact.New()
 	red.AddSecret(passphrase)
 
-	d := borg.New(src.Repo,
-		borg.WithBinary(src.Binary), borg.WithPassphrase(passphrase),
-		borg.WithSSHKey(src.SSHKeyFile), borg.WithRunner(e.borgRunner),
-	)
+	d := e.newBorg(src, passphrase)
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}

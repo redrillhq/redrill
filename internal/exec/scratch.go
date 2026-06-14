@@ -28,7 +28,7 @@ func (s *scratch) preflight(predicted int64) error {
 	if s.maxBytes > 0 && predicted > s.maxBytes {
 		return fmt.Errorf("scratch preflight: predicted %d bytes exceeds quota %d", predicted, s.maxBytes)
 	}
-	free, err := freeBytes(s.root)
+	free, err := FreeBytes(s.root)
 	if err != nil {
 		return fmt.Errorf("scratch preflight: %w", err)
 	}
@@ -40,7 +40,8 @@ func (s *scratch) preflight(predicted int64) error {
 
 func (s *scratch) cleanup() { _ = os.RemoveAll(s.root) }
 
-func freeBytes(path string) (uint64, error) {
+// FreeBytes returns the bytes available to an unprivileged writer at path.
+func FreeBytes(path string) (uint64, error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
 		return 0, fmt.Errorf("statfs %s: %w", path, err)

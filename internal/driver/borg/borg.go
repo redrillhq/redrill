@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,11 +26,12 @@ import (
 type Runner func(ctx context.Context, dir string, env []string, name string, args []string) (stdout, stderr []byte, exitCode int, err error)
 
 type Driver struct {
-	repo       string
-	binary     string
-	passphrase string
-	sshKey     string
-	run        Runner
+	repo         string
+	binary       string
+	passphrase   string
+	sshKey       string
+	uploadRateKi int64 // borg --upload-ratelimit (KiB/s); 0 = unset
+	run          Runner
 }
 
 type Option func(*Driver)
@@ -49,6 +51,17 @@ func WithPassphrase(p string) Option { return func(d *Driver) { d.passphrase = p
 // WithSSHKey sets the SSH private-key path for ssh:// repos (via BORG_RSH).
 func WithSSHKey(k string) Option { return func(d *Driver) { d.sshKey = k } }
 
+// WithUploadRateLimit caps borg's transfer rate (KiB/s) on extract via borg's
+// own --upload-ratelimit; 0 leaves it unset. Best-effort: borg throttles the
+// repo-side direction it supports.
+func WithUploadRateLimit(kib int64) Option {
+	return func(d *Driver) {
+		if kib > 0 {
+			d.uploadRateKi = kib
+		}
+	}
+}
+
 // WithRunner injects a Runner; nil keeps the default exec runner.
 func WithRunner(r Runner) Option {
 	return func(d *Driver) {
@@ -59,7 +72,7 @@ func WithRunner(r Runner) Option {
 }
 
 func New(repo string, opts ...Option) *Driver {
-	d := &Driver{repo: repo, binary: "borg", run: execRunner}
+	d := &Driver{repo: repo, binary: "borg", run: ExecRunner}
 	for _, o := range opts {
 		o(d)
 	}
@@ -130,7 +143,11 @@ func (d *Driver) Restore(ctx context.Context, sel driver.Selection, targetDir st
 	if len(sel.SnapshotIDs) == 0 {
 		return driver.RestoreReport{}, errors.New("borg restore: no archive selected")
 	}
-	args := []string{"extract", d.repo + "::" + sel.SnapshotIDs[0]}
+	args := []string{"extract"}
+	if d.uploadRateKi > 0 {
+		args = append(args, "--upload-ratelimit", strconv.FormatInt(d.uploadRateKi, 10))
+	}
+	args = append(args, d.repo+"::"+sel.SnapshotIDs[0])
 	if len(sel.Paths) > 0 {
 		args = append(args, "--")
 		args = append(args, sel.Paths...)
@@ -288,7 +305,9 @@ func dirReport(dir string) (driver.RestoreReport, error) {
 	return rep, nil
 }
 
-func execRunner(ctx context.Context, dir string, env []string, name string, args []string) ([]byte, []byte, int, error) {
+// ExecRunner is the default Runner; the exec layer wraps it with nice/ionice when
+// an IO policy is configured.
+func ExecRunner(ctx context.Context, dir string, env []string, name string, args []string) ([]byte, []byte, int, error) {
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: argv is built here, not from user input
 	cmd.Dir = dir
 	cmd.Env = env

@@ -1,0 +1,27 @@
+[Unit]
+Description=redrill — scheduled restore drills for your backups
+Documentation=https://github.com/alyamovsky/redrill
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/redrill serve -c /etc/redrill/config.yaml
+Restart=on-failure
+RestartSec=10
+User=redrill
+Group=redrill
+# L3 sandboxes need the container runtime: add redrill to the docker group
+# (SupplementaryGroups=docker) or run podman rootless. Drop for L1/L2-only setups.
+# SupplementaryGroups=docker
+
+# Sandboxing. The store + scratch live under /var/lib/redrill (StateDirectory).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+StateDirectory=redrill
+ReadWritePaths=/var/lib/redrill
+
+[Install]
+WantedBy=multi-user.target

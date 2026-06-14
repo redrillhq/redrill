@@ -200,6 +200,42 @@ func TestBinaryOverride(t *testing.T) {
 	}
 }
 
+// bandwidth_limit maps to borg's own --upload-ratelimit on extract; unset adds
+// no flag.
+func TestRestoreUploadRateLimit(t *testing.T) {
+	t.Parallel()
+	t.Run("set", func(t *testing.T) {
+		t.Parallel()
+		f := newFake()
+		d := New("/r", WithRunner(f.run), WithUploadRateLimit(40960))
+		_, _ = d.Restore(context.Background(), driver.Selection{SnapshotIDs: []string{"arch-2"}}, t.TempDir())
+		extract := f.calls[0]
+		if !containsSeq(extract, "--upload-ratelimit", "40960") {
+			t.Errorf("extract argv = %v, want --upload-ratelimit 40960", extract)
+		}
+	})
+	t.Run("unset", func(t *testing.T) {
+		t.Parallel()
+		f := newFake()
+		d := New("/r", WithRunner(f.run))
+		_, _ = d.Restore(context.Background(), driver.Selection{SnapshotIDs: []string{"arch-2"}}, t.TempDir())
+		for _, a := range f.calls[0] {
+			if a == "--upload-ratelimit" {
+				t.Errorf("extract should carry no ratelimit flag: %v", f.calls[0])
+			}
+		}
+	})
+}
+
+func containsSeq(args []string, a, b string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == a && args[i+1] == b {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCapabilities(t *testing.T) {
 	t.Parallel()
 	d := New("/r")

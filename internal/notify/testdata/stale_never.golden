@@ -1,0 +1,4 @@
+redrill: new-drill proof STALE
+
+new-drill: proof is STALE — no passing L3 drill within the 10d SLA.
+Last good proof: never.

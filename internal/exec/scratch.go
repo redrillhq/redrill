@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-// scratch is a per-run restore directory with a byte quota. Drillbit restores
+// scratch is a per-run restore directory with a byte quota. Redrill restores
 // into it, runs L2/L3 against it, and removes it afterward (cleanup always).
 type scratch struct {
 	root     string

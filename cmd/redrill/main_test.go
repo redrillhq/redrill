@@ -43,7 +43,7 @@ func TestRun(t *testing.T) {
 			name:       "version human-readable",
 			args:       []string{"version"},
 			wantCode:   0,
-			wantStdout: []string{"drillbit dev", "commit none"},
+			wantStdout: []string{"redrill dev", "commit none"},
 		},
 		{
 			name:       "version unknown flag",

@@ -15,7 +15,7 @@ var ErrNoRuntime = errors.New("no sandbox runtime available")
 
 // RunLabel keys sandbox containers to the run that created them, so the janitor
 // can reap orphans from crashed runs.
-const RunLabel = "io.drillbit.run"
+const RunLabel = "io.redrill.run"
 
 // SandboxSpec describes a sandbox to start (DESIGN §9.5). The struct is an
 // implementation detail; the interface signatures below are normative (§9.2).
@@ -24,7 +24,7 @@ type SandboxSpec struct {
 	Env      map[string]string
 	Network  string            // "none" by default
 	Memory   int64             // bytes; 0 = the daemon default
-	Labels   map[string]string // includes io.drillbit.run=<run_id> for the janitor
+	Labels   map[string]string // includes io.redrill.run=<run_id> for the janitor
 	ReadyCmd []string          // polled via Exec until it exits 0 (e.g. pg_isready)
 	Files    []FileInject      // copied into the container after it starts
 }

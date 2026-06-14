@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alyamovsky/drillbit/internal/config"
-	"github.com/alyamovsky/drillbit/internal/driver"
+	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/alyamovsky/redrill/internal/driver"
 )
 
 // selectSample picks which paths of an archive to restore for L2: every file

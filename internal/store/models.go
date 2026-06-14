@@ -31,7 +31,7 @@ const (
 )
 
 // Result is a finished run's verdict (DESIGN §9.8). A still-running run has the
-// empty Result. fail (the backup is bad) and error (drillbit couldn't check)
+// empty Result. fail (the backup is bad) and error (redrill couldn't check)
 // are deliberately distinct everywhere.
 type Result string
 

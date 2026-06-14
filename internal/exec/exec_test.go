@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/checks"
-	"github.com/alyamovsky/drillbit/internal/config"
+	"github.com/alyamovsky/redrill/internal/checks"
+	"github.com/alyamovsky/redrill/internal/config"
 )
 
 var base = time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)

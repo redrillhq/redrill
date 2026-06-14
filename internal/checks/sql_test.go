@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/alyamovsky/drillbit/internal/sandbox"
+	"github.com/alyamovsky/redrill/internal/sandbox"
 )
 
 type fakeSandbox struct {

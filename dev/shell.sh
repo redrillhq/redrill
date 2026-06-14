@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Enter the drillbit dev environment, or run one command inside it.
+# Enter the redrill dev environment, or run one command inside it.
 # The ONLY host dependency is Docker — borg, postgres client tools, etc. live
 # in the dev image (built here on first use).
 #
@@ -14,8 +14,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-IMAGE=${DRILLBIT_DEV_IMAGE:-drillbit-dev}
-DATA_VOLUME=${DRILLBIT_DEV_VOLUME:-drillbit-dev-data}
+IMAGE=${REDRILL_DEV_IMAGE:-redrill-dev}
+DATA_VOLUME=${REDRILL_DEV_VOLUME:-redrill-dev-data}
 SOCK=${DOCKER_SOCK:-/var/run/docker.sock}
 
 docker info >/dev/null 2>&1 || { echo "ERROR: docker daemon not reachable" >&2; exit 2; }

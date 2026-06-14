@@ -9,21 +9,21 @@
 # purpose — freshness checks need recent data.
 #
 # This builder WRITES — but only inside FIXTURE_DIR and a temp pg container.
-# The product invariant is untouched: dev/drill.sh and drillbit itself never
+# The product invariant is untouched: dev/drill.sh and redrill itself never
 # write to repositories; building test fixtures is test-setup's job.
 #
 # Run inside the dev env: dev/shell.sh dev/make-borg-fixture.sh
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-DEV_DATA=${DEV_DATA:-/var/tmp/drillbit-dev}
+DEV_DATA=${DEV_DATA:-/var/tmp/redrill-dev}
 FIXTURE_DIR=${FIXTURE_DIR:-$DEV_DATA/borg-fixture}
 SEED=${SEED:-42}
 NUM_FILES=${NUM_FILES:-300}
 USERS=${USERS:-500}
 EVENTS=${EVENTS:-2000}
 PG_IMAGE=${PG_IMAGE:-postgres:16}
-FIXTURE_PG=${FIXTURE_PG:-drillbit-dev-fixture-pg}
+FIXTURE_PG=${FIXTURE_PG:-redrill-dev-fixture-pg}
 
 command -v borg >/dev/null || die "borg not found — run this via dev/shell.sh (all deps live in the dev image)"
 command -v docker >/dev/null || die "docker CLI not found — run this via dev/shell.sh"
@@ -47,9 +47,9 @@ pg_stop "$FIXTURE_PG"
 
 log "Creating borg repo (repokey) with two archives"
 PASSFILE="$FIXTURE_DIR/secrets/passphrase"
-printf 'drillbit-dev-fixture-%s\n' "$SEED" > "$PASSFILE"   # fixture-only secret, guards nothing real
+printf 'redrill-dev-fixture-%s\n' "$SEED" > "$PASSFILE"   # fixture-only secret, guards nothing real
 chmod 600 "$PASSFILE"
-export BORG_PASSPHRASE="drillbit-dev-fixture-$SEED"
+export BORG_PASSPHRASE="redrill-dev-fixture-$SEED"
 REPO="$FIXTURE_DIR/repo"
 borg init --encryption=repokey "$REPO"
 ( cd "$SRC" && borg create "$REPO::seed$SEED-1" . )

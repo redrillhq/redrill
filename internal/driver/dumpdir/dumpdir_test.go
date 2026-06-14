@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/driver"
+	"github.com/alyamovsky/redrill/internal/driver"
 )
 
 var base = time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)

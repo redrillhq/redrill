@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/alyamovsky/drillbit/internal/driver"
+	"github.com/alyamovsky/redrill/internal/driver"
 )
 
 // Driver lists and restores dump files matching a glob pattern in a directory.

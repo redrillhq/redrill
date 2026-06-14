@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/config"
-	exe "github.com/alyamovsky/drillbit/internal/exec"
-	"github.com/alyamovsky/drillbit/internal/sandbox/docker"
-	"github.com/alyamovsky/drillbit/internal/store"
+	"github.com/alyamovsky/redrill/internal/config"
+	exe "github.com/alyamovsky/redrill/internal/exec"
+	"github.com/alyamovsky/redrill/internal/sandbox/docker"
+	"github.com/alyamovsky/redrill/internal/store"
 )
 
 // Full L1+L2 borg drill against a real repo built in test setup (TESTING.md),

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/sandbox"
+	"github.com/alyamovsky/redrill/internal/sandbox"
 )
 
 func newRuntime(t *testing.T) *Runtime {

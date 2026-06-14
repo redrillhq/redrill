@@ -30,28 +30,28 @@ linters:
             - "**/internal/checks/**"
             - "**/internal/sandbox/**"
           deny:
-            - pkg: github.com/alyamovsky/drillbit/internal/store
+            - pkg: github.com/alyamovsky/redrill/internal/store
               desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
-            - pkg: github.com/alyamovsky/drillbit/internal/orchestrate
+            - pkg: github.com/alyamovsky/redrill/internal/orchestrate
               desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
-            - pkg: github.com/alyamovsky/drillbit/internal/server
+            - pkg: github.com/alyamovsky/redrill/internal/server
               desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
-            - pkg: github.com/alyamovsky/drillbit/internal/notify
+            - pkg: github.com/alyamovsky/redrill/internal/notify
               desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
-            - pkg: github.com/alyamovsky/drillbit/internal/scheduler
+            - pkg: github.com/alyamovsky/redrill/internal/scheduler
               desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
         leaf-config:
           files:
             - "**/internal/config/**"
           deny:
-            - pkg: github.com/alyamovsky/drillbit/internal
-              desc: internal/config is a leaf — it imports no other drillbit package
+            - pkg: github.com/alyamovsky/redrill/internal
+              desc: internal/config is a leaf — it imports no other redrill package
         leaf-redact:
           files:
             - "**/internal/redact/**"
           deny:
-            - pkg: github.com/alyamovsky/drillbit/internal
-              desc: internal/redact is a leaf — it imports no other drillbit package
+            - pkg: github.com/alyamovsky/redrill/internal
+              desc: internal/redact is a leaf — it imports no other redrill package
         no-cgo-sqlite:
           files:
             - $all
@@ -95,4 +95,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/alyamovsky/drillbit
+        - github.com/alyamovsky/redrill

@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/driver"
+	"github.com/alyamovsky/redrill/internal/driver"
 )
 
 // Runner runs a command and returns its stdout, stderr, and exit code. err is

@@ -12,13 +12,13 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-DEV_DATA=${DEV_DATA:-/var/tmp/drillbit-dev}
+DEV_DATA=${DEV_DATA:-/var/tmp/redrill-dev}
 FIXTURE_DIR=${FIXTURE_DIR:-$DEV_DATA/dumpdir-fixture}
 SEED=${SEED:-42}
 USERS=${USERS:-500}
 EVENTS=${EVENTS:-2000}
 PG_IMAGE=${PG_IMAGE:-postgres:16}
-FIXTURE_PG=${FIXTURE_PG:-drillbit-dev-fixture-pg}
+FIXTURE_PG=${FIXTURE_PG:-redrill-dev-fixture-pg}
 
 command -v docker >/dev/null || die "docker CLI not found — run this via dev/shell.sh"
 docker info >/dev/null 2>&1 || die "docker daemon not reachable"

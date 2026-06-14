@@ -10,14 +10,14 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.dat
 .PHONY: build test test-integration test-sabotage lint fmt clean
 
 build:
-	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/drillbit ./cmd/drillbit
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/redrill ./cmd/redrill
 
 test:
 	go test -race ./...
 
 # Real-engine tests in containers (needs Docker); build tag keeps them out of `make test`.
-# -p 1 serializes package binaries: the sandbox janitor reaps every drillbit
-# container, so two packages' container tests must not run at once (drillbit is
+# -p 1 serializes package binaries: the sandbox janitor reaps every redrill
+# container, so two packages' container tests must not run at once (redrill is
 # single-flight in production anyway).
 test-integration:
 	go test -race -tags integration -p 1 ./...

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/config"
-	"github.com/alyamovsky/drillbit/internal/exec"
-	"github.com/alyamovsky/drillbit/internal/store"
+	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/alyamovsky/redrill/internal/exec"
+	"github.com/alyamovsky/redrill/internal/store"
 )
 
 var base = time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
@@ -40,7 +40,7 @@ func makeGz(t *testing.T, dir, name, body string, mtime time.Time) {
 
 func newStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "drillbit.db"))
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "redrill.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

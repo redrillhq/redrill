@@ -16,13 +16,13 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/alyamovsky/drillbit/internal/checks"
-	"github.com/alyamovsky/drillbit/internal/config"
-	"github.com/alyamovsky/drillbit/internal/driver"
-	"github.com/alyamovsky/drillbit/internal/driver/borg"
-	"github.com/alyamovsky/drillbit/internal/driver/dumpdir"
-	"github.com/alyamovsky/drillbit/internal/redact"
-	"github.com/alyamovsky/drillbit/internal/sandbox"
+	"github.com/alyamovsky/redrill/internal/checks"
+	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/alyamovsky/redrill/internal/driver"
+	"github.com/alyamovsky/redrill/internal/driver/borg"
+	"github.com/alyamovsky/redrill/internal/driver/dumpdir"
+	"github.com/alyamovsky/redrill/internal/redact"
+	"github.com/alyamovsky/redrill/internal/sandbox"
 )
 
 // ErrNoSandboxRuntime signals that L3 can't run because no container runtime is
@@ -178,7 +178,7 @@ func sandboxEnv(cfg map[string]string) map[string]string {
 		env[k] = v
 	}
 	if _, ok := env["POSTGRES_PASSWORD"]; !ok {
-		env["POSTGRES_PASSWORD"] = "drillbit"
+		env["POSTGRES_PASSWORD"] = "redrill"
 	}
 	return env
 }

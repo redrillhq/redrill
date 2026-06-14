@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alyamovsky/drillbit/internal/checks"
-	"github.com/alyamovsky/drillbit/internal/config"
-	"github.com/alyamovsky/drillbit/internal/redact"
-	"github.com/alyamovsky/drillbit/internal/sandbox"
+	"github.com/alyamovsky/redrill/internal/checks"
+	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/alyamovsky/redrill/internal/redact"
+	"github.com/alyamovsky/redrill/internal/sandbox"
 )
 
 // fakeSandbox routes container Exec calls to canned results so the L3 glue is

@@ -1,7 +1,7 @@
-# `dev/` — drillbit dev environment
+# `dev/` — redrill dev environment
 
 Reproducible, containerized toolset for **real-engine e2e during development**: build
-deterministic backup fixtures (borg repo, dumpdir) and run the drill loop drillbit will
+deterministic backup fixtures (borg repo, dumpdir) and run the drill loop redrill will
 productize — restore → postgres sandbox → SQL asserts — by hand, with timings and a report.
 
 Born as the M0 spike ([docs/agents/MILESTONES.md](../docs/agents/MILESTONES.md)); kept as a permanent dev
@@ -10,7 +10,7 @@ the sabotage CI kit ([docs/agents/TESTING.md](../docs/agents/TESTING.md)) arrive
 merge gates.
 
 **The only host dependency is Docker.** Every engine dep (borg, postgres client tools, zstd,
-ssh) lives in the `drillbit-dev` image — nothing gets installed on your machine. This mirrors
+ssh) lives in the `redrill-dev` image — nothing gets installed on your machine. This mirrors
 the product's own deployment philosophy (DESIGN §10: the official image bundles the engines).
 
 ## Quickstart
@@ -76,7 +76,7 @@ All pass through `dev/shell.sh` automatically when set on the host, e.g.
 
 ## Outputs & data lifecycle
 
-Everything generated lives in the `drillbit-dev-data` volume, mounted at `/work` — never in
+Everything generated lives in the `redrill-dev-data` volume, mounted at `/work` — never in
 the repo, never on your host filesystem.
 
 - `/work/scratch/out/results.md` — the auto-filled drill report (timings, sizes, throughput,
@@ -84,7 +84,7 @@ the repo, never on your host filesystem.
 - `/work/scratch/out/` — listings and logs (`files.txt`, `load.log`, borg infos)
 - Read them via `dev/shell.sh cat /work/scratch/out/results.md` or an interactive shell
 
-Cleanup: `docker volume rm drillbit-dev-data` (data), `docker rmi drillbit-dev` (image; it
+Cleanup: `docker volume rm redrill-dev-data` (data), `docker rmi redrill-dev` (image; it
 rebuilds on next use). Exit codes from `drill.sh` follow the product taxonomy (DESIGN §9.8):
 `0` pass · `1` check failed — backup is bad · `2` couldn't check — infra.
 
@@ -93,7 +93,7 @@ rebuilds on next use). Exit codes from `drill.sh` follow the product taxonomy (D
 - **`drill.sh` is read-only on backup sources by construction** — only `borg info`/`list`/
   `extract`; dump files are only read. Mirrors the product's hard invariant.
 - The builders write only inside their `FIXTURE_DIR` and a temporary, name-pinned pg container.
-- The sandbox runs with `network=none`, is labeled `io.drillbit.dev=1`, and is removed on exit.
+- The sandbox runs with `network=none`, is labeled `io.redrill.dev=1`, and is removed on exit.
 - The fixture passphrase is a fixture-only secret (deterministic, guards synthetic data).
 
 ## Using it against a real repo (the M11 dogfood gate)
@@ -121,7 +121,7 @@ as the M11 gate prescribes.
   `CONFIG_PATH=…` / `DB_DUMP_PATH=…`.
 - **Version trap** (dump from a newer pg major) → the drill warns; rerun with `PG_IMAGE=postgres:17`.
 - **Wrong assert DB** → `ASSERT_DB=…`; list databases with
-  `KEEP=1`, then `docker exec -it drillbit-dev-pg psql -U postgres -c '\l'`.
-- **Stale image after editing the Dockerfile** → `docker rmi drillbit-dev`, it rebuilds.
+  `KEEP=1`, then `docker exec -it redrill-dev-pg psql -U postgres -c '\l'`.
+- **Stale image after editing the Dockerfile** → `docker rmi redrill-dev`, it rebuilds.
 - Reruns are always safe: fixtures rebuild from scratch, the sandbox is recreated, scratch is
   wiped per run; source access stays read-only either way.

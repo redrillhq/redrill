@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alyamovsky/drillbit/internal/driver"
+	"github.com/alyamovsky/redrill/internal/driver"
 )
 
 type fakeRunner struct {

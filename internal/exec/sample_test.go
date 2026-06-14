@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/config"
-	"github.com/alyamovsky/drillbit/internal/driver"
+	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/alyamovsky/redrill/internal/driver"
 )
 
 func sampleFiles() []driver.FileEntry {

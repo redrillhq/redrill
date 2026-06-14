@@ -3,7 +3,7 @@
 # dev/drill.sh — manual end-to-end drill runner (dev toolset, kept for the
 # life of the project; see dev/README.md).
 #
-# The loop drillbit will productize, runnable by hand against real engines:
+# The loop redrill will productize, runnable by hand against real engines:
 #   fetch/restore from a backup source -> load the contained DB dump into a
 #   postgres sandbox (network=none) -> run SQL asserts -> report timings,
 #   bytes, and verdicts.
@@ -24,7 +24,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-DEV_DATA=${DEV_DATA:-/var/tmp/drillbit-dev}
+DEV_DATA=${DEV_DATA:-/var/tmp/redrill-dev}
 
 # ---------- mode resolution ----------
 MODE=""
@@ -49,7 +49,7 @@ ARCHIVE=${ARCHIVE:-}                                 # borg: default newest
 SAMPLE_FILES=${SAMPLE_FILES:-200}                    # borg: random files for the L2-style sample
 PATTERN=${PATTERN:-*.sql.gz}                         # dumpdir: glob for dump files
 PG_IMAGE=${PG_IMAGE:-postgres:16}
-PG_CONTAINER=${PG_CONTAINER:-drillbit-dev-pg}
+PG_CONTAINER=${PG_CONTAINER:-redrill-dev-pg}
 CONFIG_PATH=${CONFIG_PATH:-}                         # borg: override path discovery
 DB_DUMP_PATH=${DB_DUMP_PATH:-}                       # borg: override path discovery
 ASSERT_DB=${ASSERT_DB:-}                             # override the database asserts run against
@@ -281,7 +281,7 @@ if ! docker image inspect "$PG_IMAGE" >/dev/null 2>&1; then
   timing "docker pull $PG_IMAGE (one-time)" "$_DUR" "-"
 fi
 t_start
-pg_start "$PG_CONTAINER" "$PG_IMAGE" --network none --label io.drillbit.dev=1
+pg_start "$PG_CONTAINER" "$PG_IMAGE" --network none --label io.redrill.dev=1
 t_stop
 timing "postgres start -> ready" "$_DUR" "$PG_IMAGE"
 
@@ -356,7 +356,7 @@ PG_MEM=$(docker stats --no-stream --format '{{.MemUsage}}' "$PG_CONTAINER" 2>/de
 # ---------- report ----------
 TOTAL_DUR=$(( $(date +%s) - SCRIPT_T0 ))
 {
-  echo "# drillbit dev drill — results"
+  echo "# redrill dev drill — results"
   echo
   echo "- date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
   echo "- host: $(uname -srm)"

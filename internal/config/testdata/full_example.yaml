@@ -1,8 +1,8 @@
 version: 1
 
-data_dir: /var/lib/drillbit          # sqlite db + artifacts
+data_dir: /var/lib/redrill          # sqlite db + artifacts
 scratch:
-  dir: /var/lib/drillbit/scratch     # restores happen here
+  dir: /var/lib/redrill/scratch     # restores happen here
   max_bytes: 50GiB                   # hard quota; preflight free-space check
 concurrency: 1                       # global single-flight by default (IO discipline)
 bandwidth_limit: 40MiB               # best-effort; passed to engine-native flags where available
@@ -14,7 +14,7 @@ server:
 
 notify:
   urls:                              # shoutrrr URLs: ntfy, telegram, discord, email, webhook...
-    - "ntfy://ntfy.example.com/drillbit"
+    - "ntfy://ntfy.example.com/redrill"
   events: [fail, error, recover, stale, weekly_digest]
   healthchecks_url: ""               # optional dead-man ping per completed scheduler cycle
 
@@ -22,8 +22,8 @@ sources:
   - name: nextcloud-borg             # P1 dogfood: Nextcloud AIO backs up via BorgBackup
     type: borg
     repo: "ssh://backup@nas.lan/./borg/nextcloud-aio"
-    passphrase_file: /etc/drillbit/secrets/borg-pass
-    ssh_key_file: /etc/drillbit/secrets/borg-readonly-key   # docs: use a read-only key
+    passphrase_file: /etc/redrill/secrets/borg-pass
+    ssh_key_file: /etc/redrill/secrets/borg-readonly-key   # docs: use a read-only key
     binary: borg                     # optional override / version pin
 
   - name: app-dumps                  # P1 dogfood: standalone pg_dump cron output
@@ -35,8 +35,8 @@ sources:
   - name: photos-restic              # P2 example
     type: restic
     repo: "s3:s3.us-west-000.backblazeb2.com/bucket/photos"
-    password_file: /etc/drillbit/secrets/restic-pass
-    env_file: /etc/drillbit/secrets/b2-readonly.env         # restricted key: Get/List only
+    password_file: /etc/redrill/secrets/restic-pass
+    env_file: /etc/redrill/secrets/b2-readonly.env         # restricted key: Get/List only
 
 drills:
   - name: nextcloud-files

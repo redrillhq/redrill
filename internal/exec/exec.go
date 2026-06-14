@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/checks"
-	"github.com/alyamovsky/drillbit/internal/config"
-	"github.com/alyamovsky/drillbit/internal/driver"
-	"github.com/alyamovsky/drillbit/internal/driver/borg"
-	"github.com/alyamovsky/drillbit/internal/driver/dumpdir"
-	"github.com/alyamovsky/drillbit/internal/redact"
-	"github.com/alyamovsky/drillbit/internal/sandbox"
+	"github.com/alyamovsky/redrill/internal/checks"
+	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/alyamovsky/redrill/internal/driver"
+	"github.com/alyamovsky/redrill/internal/driver/borg"
+	"github.com/alyamovsky/redrill/internal/driver/dumpdir"
+	"github.com/alyamovsky/redrill/internal/redact"
+	"github.com/alyamovsky/redrill/internal/sandbox"
 )
 
 // ErrUnsupported is returned (wrapped) when a step's (level, source type) isn't

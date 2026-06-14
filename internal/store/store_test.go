@@ -13,7 +13,7 @@ var epoch = time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
 
 func newStore(t *testing.T) *Store {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "drillbit.db")
+	path := filepath.Join(t.TempDir(), "redrill.db")
 	s, err := Open(context.Background(), path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -82,7 +82,7 @@ func TestOpenMigratesFromEmpty(t *testing.T) {
 func TestOpenIsIdempotent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "drillbit.db")
+	path := filepath.Join(t.TempDir(), "redrill.db")
 
 	s1, err := Open(ctx, path)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestOpenIsIdempotent(t *testing.T) {
 func TestOpenBadPath(t *testing.T) {
 	t.Parallel()
 	// A directory that does not exist cannot be created as a DB file.
-	_, err := Open(context.Background(), filepath.Join(t.TempDir(), "nope", "drillbit.db"))
+	_, err := Open(context.Background(), filepath.Join(t.TempDir(), "nope", "redrill.db"))
 	if err == nil {
 		t.Fatal("want error opening under a missing directory")
 	}

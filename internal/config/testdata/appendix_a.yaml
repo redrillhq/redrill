@@ -1,17 +1,17 @@
 version: 1
-data_dir: /var/lib/drillbit
-scratch: { dir: /var/lib/drillbit/scratch, max_bytes: 40GiB }
+data_dir: /var/lib/redrill
+scratch: { dir: /var/lib/redrill/scratch, max_bytes: 40GiB }
 concurrency: 1
 notify:
-  urls: ["ntfy://ntfy.example.com/drillbit"]
+  urls: ["ntfy://ntfy.example.com/redrill"]
   events: [fail, error, recover, stale, weekly_digest]
 
 sources:
   - name: nextcloud-aio
     type: borg
     repo: "ssh://backup@nas.lan/./borg/nextcloud-aio"
-    passphrase_file: /etc/drillbit/secrets/borg-pass
-    ssh_key_file: /etc/drillbit/secrets/borg-ro-key
+    passphrase_file: /etc/redrill/secrets/borg-pass
+    ssh_key_file: /etc/redrill/secrets/borg-ro-key
   - name: pg-dumps
     type: dumpdir
     path: /backups/pg

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/sandbox"
+	"github.com/alyamovsky/redrill/internal/sandbox"
 )
 
 // Status is a single check's verdict (DESIGN §9.8). A check that runs yields

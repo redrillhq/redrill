@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/driver"
+	"github.com/alyamovsky/redrill/internal/driver"
 )
 
 // Real-engine tests against borg 1.x (TESTING.md): the driver is exercised

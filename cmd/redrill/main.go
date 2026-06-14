@@ -1,4 +1,4 @@
-// Command drillbit proves backups are restorable by running scheduled
+// Command redrill proves backups are restorable by running scheduled
 // restore drills against them. This package is CLI wiring only; all logic
 // lives under internal/.
 package main
@@ -16,14 +16,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/config"
-	"github.com/alyamovsky/drillbit/internal/exec"
-	"github.com/alyamovsky/drillbit/internal/orchestrate"
-	"github.com/alyamovsky/drillbit/internal/sandbox/docker"
-	"github.com/alyamovsky/drillbit/internal/store"
+	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/alyamovsky/redrill/internal/exec"
+	"github.com/alyamovsky/redrill/internal/orchestrate"
+	"github.com/alyamovsky/redrill/internal/sandbox/docker"
+	"github.com/alyamovsky/redrill/internal/store"
 )
 
-const defaultConfigPath = "/etc/drillbit/config.yaml"
+const defaultConfigPath = "/etc/redrill/config.yaml"
 
 // Set at build time via -ldflags (see Makefile).
 var (
@@ -32,10 +32,10 @@ var (
 	date    = "unknown"
 )
 
-const usage = `drillbit — scheduled restore drills for your backups
+const usage = `redrill — scheduled restore drills for your backups
 
 Usage:
-  drillbit <command> [flags]
+  redrill <command> [flags]
 
 Commands:
   validate   strictly check a config file
@@ -65,7 +65,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, usage)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "drillbit: unknown command %q\n\n%s", args[0], usage)
+		fmt.Fprintf(stderr, "redrill: unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
 }
@@ -88,12 +88,12 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 			"go":      runtime.Version(),
 		}
 		if err := json.NewEncoder(stdout).Encode(info); err != nil {
-			fmt.Fprintf(stderr, "drillbit: %v\n", err)
+			fmt.Fprintf(stderr, "redrill: %v\n", err)
 			return 2
 		}
 		return 0
 	}
-	fmt.Fprintf(stdout, "drillbit %s (commit %s, built %s, %s)\n", version, commit, date, runtime.Version())
+	fmt.Fprintf(stdout, "redrill %s (commit %s, built %s, %s)\n", version, commit, date, runtime.Version())
 	return 0
 }
 
@@ -118,14 +118,14 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 				"errors": errorLines(err),
 			})
 		} else {
-			fmt.Fprintf(stderr, "drillbit: %s is invalid:\n%v\n", *path, err)
+			fmt.Fprintf(stderr, "redrill: %s is invalid:\n%v\n", *path, err)
 		}
 		return 3
 	}
 	if *jsonOut {
 		writeJSON(stdout, map[string]any{"valid": true, "config": *path})
 	} else {
-		fmt.Fprintf(stdout, "drillbit: %s is valid\n", *path)
+		fmt.Fprintf(stdout, "redrill: %s is valid\n", *path)
 	}
 	return 0
 }
@@ -164,7 +164,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		fmt.Fprintln(stderr, "drillbit: run requires a drill NAME")
+		fmt.Fprintln(stderr, "redrill: run requires a drill NAME")
 		return 2
 	}
 	name := rest[0]
@@ -179,23 +179,23 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := config.Load(*path)
 	if err != nil {
-		fmt.Fprintf(stderr, "drillbit: %s is invalid:\n%v\n", *path, err)
+		fmt.Fprintf(stderr, "redrill: %s is invalid:\n%v\n", *path, err)
 		return 3
 	}
 	drill, src, ok := findDrill(cfg, name)
 	if !ok {
-		fmt.Fprintf(stderr, "drillbit: no drill named %q in %s\n", name, *path)
+		fmt.Fprintf(stderr, "redrill: no drill named %q in %s\n", name, *path)
 		return 2
 	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
-		fmt.Fprintf(stderr, "drillbit: cannot create data_dir %s: %v\n", cfg.DataDir, err)
+		fmt.Fprintf(stderr, "redrill: cannot create data_dir %s: %v\n", cfg.DataDir, err)
 		return 2
 	}
 	ctx := context.Background()
-	st, err := store.Open(ctx, filepath.Join(cfg.DataDir, "drillbit.db"))
+	st, err := store.Open(ctx, filepath.Join(cfg.DataDir, "redrill.db"))
 	if err != nil {
-		fmt.Fprintf(stderr, "drillbit: %v\n", err)
+		fmt.Fprintf(stderr, "redrill: %v\n", err)
 		return 2
 	}
 	defer func() { _ = st.Close() }()
@@ -216,13 +216,13 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	}
 	res, err := o.Run(ctx, *drill, *src, opts)
 	if err != nil {
-		fmt.Fprintf(stderr, "drillbit: %v\n", err)
+		fmt.Fprintf(stderr, "redrill: %v\n", err)
 		return 2
 	}
 	if *jsonOut {
 		writeJSON(stdout, runResultJSON(name, res))
 	} else {
-		fmt.Fprintf(stdout, "drillbit: %s → %s (reached %s, run %d)\n",
+		fmt.Fprintf(stdout, "redrill: %s → %s (reached %s, run %d)\n",
 			name, strings.ToUpper(string(res.Status)), res.LevelReached, res.RunID)
 	}
 	return resultExit(res.Status)

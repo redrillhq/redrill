@@ -1,4 +1,4 @@
-module github.com/alyamovsky/drillbit
+module github.com/alyamovsky/redrill
 
 go 1.26.0
 

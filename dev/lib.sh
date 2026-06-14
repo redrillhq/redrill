@@ -1,4 +1,4 @@
-# dev/lib.sh — shared helpers for the drillbit dev toolset. Sourced, never executed.
+# dev/lib.sh — shared helpers for the redrill dev toolset. Sourced, never executed.
 # Portability target: bash 3.2+ (macOS default) and Linux. Functions only, no side effects.
 
 log()  { printf '\n==> %s\n' "$*" >&2; }
@@ -35,7 +35,7 @@ gen_tree() { # dir num_files seed
   local dir=$1 n=$2 seed=$3 i sub kb
   mkdir -p "$dir/config" "$dir/data/docs" "$dir/data/media" "$dir/data/projects"
   {
-    printf '<?php // drillbit dev fixture (seed=%s) — stands in for an app config\n' "$seed"
+    printf '<?php // redrill dev fixture (seed=%s) — stands in for an app config\n' "$seed"
     printf '$CONFIG = array("instanceid" => "devfixture%s", "version" => "1.0.0");\n' "$seed"
   } > "$dir/config/config.php"
   i=1
@@ -50,7 +50,7 @@ gen_tree() { # dir num_files seed
     awk -v f="$i" -v seed="$seed" -v kb="$kb" 'BEGIN{
       bytes = kb * 1024; printed = 0; k = 0;
       while (printed < bytes) {
-        s = sprintf("drillbit dev fixture seed=%s file=%d line=%d\n", seed, f, ++k);
+        s = sprintf("redrill dev fixture seed=%s file=%d line=%d\n", seed, f, ++k);
         if (printed + length(s) > bytes) s = substr(s, 1, bytes - printed);
         printf "%s", s; printed += length(s);
       }

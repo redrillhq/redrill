@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the whole drillbit configuration (DESIGN §7). Load it with Load or
+// Config is the whole redrill configuration (DESIGN §7). Load it with Load or
 // Parse; both return a fully validated Config or a config error.
 type Config struct {
 	Version        int      `yaml:"version"`

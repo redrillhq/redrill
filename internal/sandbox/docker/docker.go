@@ -1,6 +1,6 @@
 // Package docker implements the sandbox runtime via the Docker Engine API (which
 // also serves podman's compatible socket). Sandboxes default to network=none and
-// carry the io.drillbit.run label so the janitor can reap orphans.
+// carry the io.redrill.run label so the janitor can reap orphans.
 package docker
 
 import (
@@ -20,7 +20,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 
-	"github.com/alyamovsky/drillbit/internal/sandbox"
+	"github.com/alyamovsky/redrill/internal/sandbox"
 )
 
 // Runtime is a Docker-backed sandbox.SandboxRuntime.
@@ -103,7 +103,7 @@ func (r *Runtime) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
-// Janitor force-removes every container labeled by drillbit (orphans from
+// Janitor force-removes every container labeled by redrill (orphans from
 // crashed runs). It is safe to call at startup and returns how many it removed.
 func (r *Runtime) Janitor(ctx context.Context) (int, error) {
 	list, err := r.cli.ContainerList(ctx, container.ListOptions{

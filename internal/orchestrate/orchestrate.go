@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/checks"
-	"github.com/alyamovsky/drillbit/internal/config"
-	"github.com/alyamovsky/drillbit/internal/exec"
-	"github.com/alyamovsky/drillbit/internal/store"
+	"github.com/alyamovsky/redrill/internal/checks"
+	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/alyamovsky/redrill/internal/exec"
+	"github.com/alyamovsky/redrill/internal/store"
 )
 
 const statusSkipped = "skipped"

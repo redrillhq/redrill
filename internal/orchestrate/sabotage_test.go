@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/drillbit/internal/checks"
-	"github.com/alyamovsky/drillbit/internal/store"
+	"github.com/alyamovsky/redrill/internal/checks"
+	"github.com/alyamovsky/redrill/internal/store"
 )
 
 // The sabotage kit (TESTING.md, DESIGN §13.3): each fixture is a "perfect cron,
-// dead backup" scenario (DESIGN §2.1) that drillbit must flag. The gate
+// dead backup" scenario (DESIGN §2.1) that redrill must flag. The gate
 // (make test-sabotage) fails unless the exact verdict and catching check hold.
 // dumpdir fixtures are built here rather than committed because they depend on
 // file mtime, which git does not preserve.

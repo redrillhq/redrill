@@ -7,7 +7,7 @@ COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build test test-integration test-sabotage lint fmt clean
+.PHONY: build test test-integration test-sabotage test-flake test-fuzz lint fmt clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/redrill ./cmd/redrill
@@ -28,6 +28,20 @@ test-integration:
 # redrill container, so two packages' container tests must not run at once.
 test-sabotage:
 	go test -tags sabotage -p 1 ./...
+
+# Determinism gate: shuffle test order and run every test twice. Injected clocks
+# and no package-level mutable state must keep this green across orderings.
+test-flake:
+	go test -race -shuffle=on -count=2 ./...
+
+# Bounded native fuzzing of the surfaces where a silent mis-read becomes a silent
+# mis-verdict. Each target runs in isolation; raise FUZZTIME for longer CI runs.
+FUZZTIME ?= 20s
+test-fuzz:
+	go test -run=^$$ -fuzz=^FuzzParseExpect$$ -fuzztime=$(FUZZTIME) ./internal/checks/
+	go test -run=^$$ -fuzz=^FuzzParse$$ -fuzztime=$(FUZZTIME) ./internal/config/
+	go test -run=^$$ -fuzz=^FuzzStageDump$$ -fuzztime=$(FUZZTIME) ./internal/exec/
+	go test -run=^$$ -fuzz=^FuzzRedactNoSecretSurvives$$ -fuzztime=$(FUZZTIME) ./internal/redact/
 
 lint:
 	$(GOLANGCI_LINT) run

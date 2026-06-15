@@ -24,6 +24,7 @@ import (
 	"github.com/alyamovsky/redrill/internal/scheduler"
 	"github.com/alyamovsky/redrill/internal/server"
 	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/alyamovsky/redrill/web"
 )
 
 func runServe(args []string, _, stderr io.Writer) int {
@@ -182,7 +183,12 @@ func startHTTP(ctx context.Context, cfg *config.Config, st *store.Store, clock f
 		log.Info("http api disabled (no server.listen configured)")
 		return nil, 0
 	}
-	srv, err := server.New(server.Options{Store: st, Config: cfg, Now: clock, Trigger: trigger, Logger: log})
+	ui, err := web.Assets()
+	if err != nil {
+		log.Warn("ui assets unavailable; serving API only", "error", err.Error())
+		ui = nil
+	}
+	srv, err := server.New(server.Options{Store: st, Config: cfg, Now: clock, Trigger: trigger, UI: ui, Logger: log})
 	if err != nil {
 		log.Error("invalid server config", "error", err.Error())
 		return nil, 3

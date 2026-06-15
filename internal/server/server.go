@@ -9,7 +9,9 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
@@ -35,6 +37,7 @@ type Options struct {
 	Config  *config.Config
 	Now     func() time.Time // injected clock (UTC); defaults to time.Now().UTC
 	Trigger TriggerFunc      // nil disables POST .../run (503)
+	UI      fs.FS            // built SPA assets (rooted at index.html); nil serves API only
 	Logger  *slog.Logger
 }
 
@@ -45,6 +48,9 @@ type Server struct {
 	trigger TriggerFunc
 	auth    *basicAuth    // nil when no basic_auth_file is configured
 	limiter *rate.Limiter // gates the mutating trigger endpoint
+	ui      fs.FS         // nil when no UI was embedded/injected
+	uiFiles http.Handler  // static file server over ui
+	uiIndex []byte        // cached index.html for the SPA fallback
 	log     *slog.Logger
 }
 
@@ -70,6 +76,16 @@ func New(opts Options) (*Server, error) {
 		}
 		auth = a
 	}
+	var uiIndex []byte
+	var uiFiles http.Handler
+	if opts.UI != nil {
+		b, err := fs.ReadFile(opts.UI, "index.html")
+		if err != nil {
+			return nil, fmt.Errorf("server: UI assets missing index.html: %w", err)
+		}
+		uiIndex = b
+		uiFiles = http.FileServerFS(opts.UI)
+	}
 	return &Server{
 		store:   opts.Store,
 		cfg:     opts.Config,
@@ -79,6 +95,9 @@ func New(opts Options) (*Server, error) {
 		// ~1 trigger/sec sustained, small burst — a manual "Run now" guard, not a
 		// throughput limiter (single-flight already serializes the actual runs).
 		limiter: rate.NewLimiter(rate.Every(time.Second), 5),
+		ui:      opts.UI,
+		uiFiles: uiFiles,
+		uiIndex: uiIndex,
 		log:     log,
 	}, nil
 }
@@ -94,6 +113,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/drills/{name}/runs", s.requireAuth(s.handleDrillRuns))
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.requireAuth(s.handleRun))
 	mux.HandleFunc("POST /api/v1/drills/{name}/run", s.requireAuth(s.rateLimit(s.handleTrigger)))
+	if s.ui != nil {
+		// Catch-all for the SPA; the specific /api, /healthz, /metrics patterns
+		// above win by ServeMux's longest-pattern precedence.
+		mux.HandleFunc("GET /", s.handleUI)
+	}
 	return s.recoverer(s.logRequests(mux))
 }
 

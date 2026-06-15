@@ -158,6 +158,10 @@ func TestServeHTTPEndpoints(t *testing.T) {
 	if code, body := httpGet(t, base+"/metrics"); code != http.StatusOK || !strings.Contains(body, "redrill_proof_sla_ok") {
 		t.Fatalf("/metrics = %d %q", code, body)
 	}
+	// The embedded SPA is served at / (and as the fallback for client routes).
+	if code, body := httpGet(t, base+"/"); code != http.StatusOK || !strings.Contains(body, `id="root"`) {
+		t.Fatalf("GET / (web UI) = %d %q", code, body)
+	}
 
 	// Trigger a run, then wait for it to land with trigger "api".
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, base+"/api/v1/drills/app-db/run", nil)

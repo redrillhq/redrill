@@ -8,6 +8,13 @@ DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
 .PHONY: build test test-integration test-sabotage test-flake test-fuzz test-mutation lint fmt clean
+.PHONY: web web-install web-lint web-fmt
+.PHONY: docker-up docker-down docker-logs
+
+# The React SPA in web/ is embedded into the binary via web/embed.go, so `make
+# build` (and `go test ./...`) need web/dist present — run `make web` once, or
+# keep dist committed.
+NPM := npm --prefix web
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/redrill ./cmd/redrill
@@ -61,6 +68,36 @@ lint:
 
 fmt:
 	$(GOLANGCI_LINT) fmt
+
+# Frontend gates (LINTING.md): TypeScript strict typecheck + ESLint + Prettier.
+web-install:
+	$(NPM) install
+
+web:
+	$(NPM) run build
+
+web-lint:
+	$(NPM) run typecheck
+	$(NPM) run lint
+	$(NPM) run format:check
+
+web-fmt:
+	$(NPM) run format
+
+# Run the product image the way it ships: built from deploy/docker/Dockerfile
+# (multi-stage — web UI + static binary), wired by the compose example (volumes,
+# ports, config). UI + API at http://127.0.0.1:8090/.
+COMPOSE := docker compose -f deploy/compose/compose.yaml
+
+docker-up:
+	$(COMPOSE) up --build -d
+	@echo "redrill running — open http://127.0.0.1:8090/  (logs: make docker-logs - stop: make docker-down)"
+
+docker-down:
+	$(COMPOSE) down
+
+docker-logs:
+	$(COMPOSE) logs -f
 
 clean:
 	rm -rf bin

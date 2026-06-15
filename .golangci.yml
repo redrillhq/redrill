@@ -77,6 +77,10 @@ linters:
       require-explanation: true
       require-specific: true
   exclusions:
+    paths:
+      # web/node_modules holds JS packages that ship their own .go files (e.g.
+      # flatted); they are not ours and not part of the binary.
+      - web/node_modules
     rules:
       # cmd/ is the CLI renderer; raw prints are its job.
       - path: ^cmd/
@@ -102,3 +106,6 @@ formatters:
     goimports:
       local-prefixes:
         - github.com/alyamovsky/redrill
+  exclusions:
+    paths:
+      - web/node_modules

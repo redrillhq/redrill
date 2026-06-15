@@ -129,6 +129,10 @@ func TestDrillsList(t *testing.T) {
 	if d.LastResult != "pass" || d.LastProven == "" || d.NextRun == "" {
 		t.Errorf("missing computed fields: %+v", d)
 	}
+	// 10-day SLA → the UI's amber/red threshold input.
+	if d.MaxProofAgeSecs != int64((10 * 24 * time.Hour).Seconds()) {
+		t.Errorf("max_proof_age_seconds = %d, want %d", d.MaxProofAgeSecs, int64((10 * 24 * time.Hour).Seconds()))
+	}
 	if d.Proofs["l1"] == "" {
 		t.Errorf("proofs map missing l1: %+v", d.Proofs)
 	}

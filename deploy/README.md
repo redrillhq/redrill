@@ -15,6 +15,8 @@ docker compose up -d
 docker compose exec redrill redrill doctor   # preflight: engines, runtime, scratch, repos
 ```
 
+From the repo root, `make docker-up` builds the image and starts this stack in one step (`make docker-down` to stop, `make docker-logs` to tail) — handy for a production-like local run. The web UI + API are then at `http://127.0.0.1:8090/`.
+
 - **Expose backups read-only.** Mount the repositories/dump directories you audit
   with `:ro`. redrill never writes to them by construction, and the read-only
   mount makes that belt-and-suspenders.
@@ -45,13 +47,17 @@ systemctl enable --now redrill
 For L3, add `redrill` to the `docker` group (uncomment `SupplementaryGroups=docker`
 in the unit) or use rootless podman.
 
-## HTTP API & metrics
+## Web UI, HTTP API & metrics
 
-Set `server.listen` (e.g. `":8090"`) to expose the read-only REST API and
-Prometheus metrics; omit it to run headless. The API is read-only by design —
-the only mutating endpoint is the run trigger.
+Set `server.listen` (e.g. `":8090"`) to expose the web dashboard, the read-only
+REST API, and Prometheus metrics; omit it to run headless. Open
+`http://<host>:8090/` for the UI (proof board, run detail, history) — it is the
+embedded SPA, served by the same daemon, no extra container or process. The API
+is read-only by design — the only mutating endpoint is the run trigger (the UI's
+"Run now").
 
 ```
+GET  /                                 # web UI (embedded SPA)
 GET  /healthz                          # liveness
 GET  /metrics                          # Prometheus (redrill_proof_sla_ok, …)
 GET  /api/v1/drills                    # per-drill status: proof age, next run, SLA

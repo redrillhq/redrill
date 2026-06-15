@@ -19,16 +19,17 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 // drillView is a drill's computed status: last run, proof age per level, next
 // run, and SLA state — the same picture `redrill status` renders.
 type drillView struct {
-	Drill         string            `json:"drill"`
-	Source        string            `json:"source"`
-	HeadlineLevel string            `json:"headline_level,omitempty"`
-	Stale         bool              `json:"stale"`
-	LastResult    string            `json:"last_result,omitempty"`
-	LevelReached  string            `json:"level_reached,omitempty"`
-	LastRunAt     string            `json:"last_run_at,omitempty"`
-	LastProven    string            `json:"last_proven,omitempty"`
-	NextRun       string            `json:"next_run,omitempty"`
-	Proofs        map[string]string `json:"proofs,omitempty"`
+	Drill           string            `json:"drill"`
+	Source          string            `json:"source"`
+	HeadlineLevel   string            `json:"headline_level,omitempty"`
+	Stale           bool              `json:"stale"`
+	MaxProofAgeSecs int64             `json:"max_proof_age_seconds,omitempty"`
+	LastResult      string            `json:"last_result,omitempty"`
+	LevelReached    string            `json:"level_reached,omitempty"`
+	LastRunAt       string            `json:"last_run_at,omitempty"`
+	LastProven      string            `json:"last_proven,omitempty"`
+	NextRun         string            `json:"next_run,omitempty"`
+	Proofs          map[string]string `json:"proofs,omitempty"`
 }
 
 func (s *Server) handleDrills(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +48,10 @@ func (s *Server) handleDrills(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) drillView(ctx context.Context, d *config.Drill, now time.Time) (drillView, error) {
-	v := drillView{Drill: d.Name, Source: d.Source, HeadlineLevel: scheduler.HeadlineLevel(*d)}
+	v := drillView{
+		Drill: d.Name, Source: d.Source, HeadlineLevel: scheduler.HeadlineLevel(*d),
+		MaxProofAgeSecs: int64(d.MaxProofAge.Duration().Seconds()),
+	}
 
 	runs, err := s.store.ListRuns(ctx, d.Name, 1)
 	if err != nil {

@@ -1,0 +1,13 @@
+# The web UI is rebuilt fresh in the Dockerfile's node stage, so the build
+# context needs neither node_modules nor a (possibly stale) committed dist.
+web/node_modules
+web/dist
+
+.git
+.github
+.idea
+bin
+tmp
+coverage.out
+dev/config*.yaml
+**/.DS_Store

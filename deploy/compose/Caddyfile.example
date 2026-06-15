@@ -1,0 +1,27 @@
+# Caddy reverse proxy for an exposed redrill. Caddy terminates TLS (auto-HTTPS via
+# Let's Encrypt) so redrill itself never needs a public port — put it on an
+# internal compose network and let Caddy be the only edge.
+#
+# Replace redrill.example.com with your domain. `redrill:8090` assumes both run in
+# the same compose project (drop the published port from compose.yaml so the
+# daemon isn't reachable except through Caddy).
+
+redrill.example.com {
+	# Keep /metrics off the public internet — it discloses drill names, proof
+	# ages, and SLA state. Allow only your monitoring network; 403 for everyone
+	# else. (Or gate it in redrill with `server.auth_scope: all`.)
+	@public_metrics {
+		path /metrics
+		not remote_ip 10.0.0.0/8 192.168.0.0/16 127.0.0.1
+	}
+	respond @public_metrics 403
+
+	# Optional: let Caddy do the auth instead of redrill's basic_auth_file.
+	# basic_auth {
+	#	admin <bcrypt-hash>   # caddy hash-password --plaintext '...'
+	# }
+
+	# UI + API. redrill's own basic auth (basic_auth_file) still applies on top if
+	# configured; Caddy adds TLS either way.
+	reverse_proxy redrill:8090
+}

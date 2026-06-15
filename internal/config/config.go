@@ -37,7 +37,15 @@ type Nice struct {
 
 type Server struct {
 	Listen        string `yaml:"listen"`
-	BasicAuthFile string `yaml:"basic_auth_file"`
+	BasicAuthFile string `yaml:"basic_auth_file"` // bcrypt htpasswd path
+	BasicAuthEnv  string `yaml:"basic_auth_env"`  // env var with plaintext user:password lines
+	APIKeysEnv    string `yaml:"api_keys_env"`    // env var with bearer API keys
+	AuthScope     string `yaml:"auth_scope"`      // api (default) | all
+	AllowNoAuth   bool   `yaml:"allow_no_auth"`   // opt in to serving HTTP with no auth
+}
+
+func (s Server) hasAuth() bool {
+	return s.BasicAuthFile != "" || s.BasicAuthEnv != "" || s.APIKeysEnv != ""
 }
 
 type Notify struct {
@@ -124,6 +132,18 @@ func (c *Config) Validate() error {
 		if _, _, err := net.SplitHostPort(c.Server.Listen); err != nil {
 			es.add("server.listen", "invalid listen address %q", c.Server.Listen)
 		}
+	}
+	switch c.Server.AuthScope {
+	case "", "api", "all":
+	default:
+		es.add("server.auth_scope", "must be api or all, got %q", c.Server.AuthScope)
+	}
+	if c.Server.AuthScope == "all" && !c.Server.hasAuth() {
+		es.add("server.auth_scope", "all requires basic_auth_file, basic_auth_env, or api_keys_env")
+	}
+	// Secure by default: serving HTTP without any auth must be an explicit choice.
+	if c.Server.Listen != "" && !c.Server.hasAuth() && !c.Server.AllowNoAuth {
+		es.add("server.listen", "set without authentication; configure basic_auth_env, basic_auth_file, or api_keys_env, or set allow_no_auth: true to serve open (e.g. a private host or behind an authenticating reverse proxy)")
 	}
 	if u := c.Notify.HealthchecksURL; u != "" {
 		if parsed, err := url.Parse(u); err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {

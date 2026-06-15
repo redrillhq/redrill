@@ -10,7 +10,10 @@ nice: { cpu: 10, io_class: idle }    # applied to spawned engine processes
 
 server:
   listen: ":8090"
-  basic_auth_file: ""                # optional htpasswd; recommend reverse proxy for TLS
+  # Auth is required once listen is set. Use basic_auth_env ("user:password" lines),
+  # basic_auth_file (bcrypt htpasswd), or api_keys_env (bearer tokens for API/MCP) —
+  # or set allow_no_auth to serve open (localhost / behind an authenticating proxy).
+  allow_no_auth: true
 
 notify:
   urls:                              # shoutrrr URLs: ntfy, telegram, discord, email, webhook...

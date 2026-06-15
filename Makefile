@@ -8,7 +8,7 @@ DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
 .PHONY: build test test-integration test-sabotage test-flake test-fuzz test-mutation lint fmt clean
-.PHONY: web web-install web-lint web-fmt
+.PHONY: web web-install web-lint web-fmt web-test web-e2e
 .PHONY: docker-up docker-down docker-logs
 
 # The React SPA in web/ is embedded into the binary via web/embed.go, so `make
@@ -83,6 +83,16 @@ web-lint:
 
 web-fmt:
 	$(NPM) run format
+
+# Vitest unit/component tests (jsdom). Fast, hermetic; no browser.
+web-test:
+	$(NPM) run test
+
+# Playwright browser e2e against the built UI (mocked API). Needs the browser:
+# `npx --prefix web playwright install chromium` once.
+web-e2e:
+	$(NPM) run build
+	$(NPM) run e2e
 
 # Run the product image the way it ships: built from deploy/docker/Dockerfile
 # (multi-stage — web UI + static binary), wired by the compose example (volumes,

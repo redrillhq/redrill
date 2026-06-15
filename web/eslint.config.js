@@ -22,4 +22,11 @@ export default tseslint.config(
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },
+  {
+    // Tooling config + e2e specs run in Node and aren't Fast-Refresh modules.
+    files: ['playwright.config.ts', 'e2e/**/*.ts'],
+    languageOptions: { globals: globals.node },
+    plugins: { 'react-refresh': reactRefresh },
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 )

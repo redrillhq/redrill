@@ -290,3 +290,122 @@ func TestBasicAuth(t *testing.T) {
 		t.Errorf("metrics status = %d, want 200 (no auth)", c)
 	}
 }
+
+func withAuth(t *testing.T, s *Server) http.Handler {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte("s3cret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.auth = &basicAuth{users: map[string][]byte{"admin": hash}}
+	return s.Handler()
+}
+
+func TestAuthScopeAll(t *testing.T) {
+	t.Parallel()
+	cfg := testConfig()
+	cfg.Server.AuthScope = "all"
+	s, err := New(Options{Store: testStore(t), Config: cfg, Now: func() time.Time { return testNow }, UI: uiFS()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := withAuth(t, s)
+
+	// auth_scope=all extends basic auth to /metrics and the UI; /healthz stays open.
+	if c := do(t, h, http.MethodGet, "/metrics").Code; c != http.StatusUnauthorized {
+		t.Errorf("/metrics no-creds = %d, want 401", c)
+	}
+	if c := do(t, h, http.MethodGet, "/").Code; c != http.StatusUnauthorized {
+		t.Errorf("/ no-creds = %d, want 401", c)
+	}
+	if c := do(t, h, http.MethodGet, "/healthz").Code; c != http.StatusOK {
+		t.Errorf("/healthz = %d, want 200 (always open)", c)
+	}
+	if c := do(t, h, http.MethodGet, "/metrics", "admin", "s3cret").Code; c != http.StatusOK {
+		t.Errorf("/metrics good-creds = %d, want 200", c)
+	}
+	if c := do(t, h, http.MethodGet, "/", "admin", "s3cret").Code; c != http.StatusOK {
+		t.Errorf("/ good-creds = %d, want 200", c)
+	}
+}
+
+func doToken(t *testing.T, h http.Handler, path, headerKey, headerVal string) int {
+	t.Helper()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil)
+	req.Header.Set(headerKey, headerVal)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec.Code
+}
+
+func TestBasicAuthEnv(t *testing.T) {
+	// t.Setenv forbids t.Parallel.
+	t.Setenv("REDRILL_TEST_BASIC", "admin:s3cret")
+	cfg := testConfig()
+	cfg.Server.BasicAuthEnv = "REDRILL_TEST_BASIC"
+	s, err := New(Options{Store: testStore(t), Config: cfg, Now: func() time.Time { return testNow }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	if c := do(t, h, http.MethodGet, "/api/v1/drills").Code; c != http.StatusUnauthorized {
+		t.Errorf("no creds = %d, want 401", c)
+	}
+	if c := do(t, h, http.MethodGet, "/api/v1/drills", "admin", "s3cret").Code; c != http.StatusOK {
+		t.Errorf("good creds = %d, want 200", c)
+	}
+	if c := do(t, h, http.MethodGet, "/api/v1/drills", "admin", "wrong").Code; c != http.StatusUnauthorized {
+		t.Errorf("bad creds = %d, want 401", c)
+	}
+}
+
+func TestAPIKeyAuth(t *testing.T) {
+	t.Setenv("REDRILL_TEST_KEYS", "key-abc\nkey-def")
+	cfg := testConfig()
+	cfg.Server.APIKeysEnv = "REDRILL_TEST_KEYS"
+	s, err := New(Options{Store: testStore(t), Config: cfg, Now: func() time.Time { return testNow }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	if c := do(t, h, http.MethodGet, "/api/v1/drills").Code; c != http.StatusUnauthorized {
+		t.Errorf("no key = %d, want 401", c)
+	}
+	if c := doToken(t, h, "/api/v1/drills", "Authorization", "Bearer key-abc"); c != http.StatusOK {
+		t.Errorf("bearer key = %d, want 200", c)
+	}
+	if c := doToken(t, h, "/api/v1/drills", "X-API-Key", "key-def"); c != http.StatusOK {
+		t.Errorf("x-api-key = %d, want 200", c)
+	}
+	if c := doToken(t, h, "/api/v1/drills", "Authorization", "Bearer nope"); c != http.StatusUnauthorized {
+		t.Errorf("bad key = %d, want 401", c)
+	}
+}
+
+func TestNewRejectsEmptyAuthEnv(t *testing.T) {
+	t.Setenv("REDRILL_TEST_EMPTY", "")
+	cfg := testConfig()
+	cfg.Server.BasicAuthEnv = "REDRILL_TEST_EMPTY"
+	if _, err := New(Options{Store: testStore(t), Config: cfg}); err == nil {
+		t.Fatal("want error for an empty basic_auth_env")
+	}
+}
+
+func TestAuthScopeAPILeavesExtraOpen(t *testing.T) {
+	t.Parallel()
+	// Default scope (api): the UI and /metrics stay open even with auth on; only /api is gated.
+	s, err := New(Options{Store: testStore(t), Config: testConfig(), Now: func() time.Time { return testNow }, UI: uiFS()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := withAuth(t, s)
+	if c := do(t, h, http.MethodGet, "/").Code; c != http.StatusOK {
+		t.Errorf("/ = %d, want 200 (open under api scope)", c)
+	}
+	if c := do(t, h, http.MethodGet, "/metrics").Code; c != http.StatusOK {
+		t.Errorf("/metrics = %d, want 200 (open under api scope)", c)
+	}
+	if c := do(t, h, http.MethodGet, "/api/v1/drills").Code; c != http.StatusUnauthorized {
+		t.Errorf("/api no-creds = %d, want 401", c)
+	}
+}

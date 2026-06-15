@@ -63,7 +63,7 @@ func setupServeConfig(t *testing.T, addr, healthchecksURL string) string {
 	body := fmt.Sprintf(`version: 1
 data_dir: %s
 scratch: {dir: %s}
-server: {listen: %q}
+server: {listen: %q, allow_no_auth: true}
 notify: {healthchecks_url: %q}
 sources:
   - {name: dumps, type: dumpdir, path: %s, pattern: "*.sql.gz", pick: newest}

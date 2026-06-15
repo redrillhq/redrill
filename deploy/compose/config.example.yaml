@@ -12,8 +12,14 @@ nice: { cpu: 10, io_class: idle }
 bandwidth_limit: 40MiB
 
 server:
-  listen: ":8090" # read-only REST API + Prometheus /metrics; omit to disable HTTP.
-  # basic_auth_file: /etc/redrill/htpasswd # optional; bcrypt entries only (htpasswd -B). Reverse-proxy for TLS.
+  listen: ":8090" # web UI + read-only REST API + Prometheus /metrics; omit to disable HTTP.
+  # Auth is REQUIRED once listen is set. This demo binds to 127.0.0.1 and opts out;
+  # before exposing redrill, enable one of the options below and DELETE allow_no_auth.
+  allow_no_auth: true
+  # basic_auth_file: /etc/redrill/htpasswd # bcrypt entries only (htpasswd -B).
+  # basic_auth_env: REDRILL_BASIC_AUTH # env var with "user:password" lines (hashed in memory) — easy in compose.
+  # api_keys_env: REDRILL_API_KEYS # bearer tokens for the API/MCP (Authorization: Bearer / X-API-Key), comma/newline-separated.
+  # auth_scope: all # default "api" gates /api/*; "all" also gates the UI + /metrics (/healthz stays open).
 
 notify:
   urls:

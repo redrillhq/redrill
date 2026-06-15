@@ -14,6 +14,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -46,7 +48,8 @@ type Server struct {
 	cfg     *config.Config
 	now     func() time.Time
 	trigger TriggerFunc
-	auth    *basicAuth    // nil when no basic_auth_file is configured
+	auth    *basicAuth    // nil when no basic auth (file or env) is configured
+	apiKeys *apiKeys      // nil when no api_keys_env is configured
 	limiter *rate.Limiter // gates the mutating trigger endpoint
 	ui      fs.FS         // nil when no UI was embedded/injected
 	uiFiles http.Handler  // static file server over ui
@@ -76,6 +79,35 @@ func New(opts Options) (*Server, error) {
 		}
 		auth = a
 	}
+	if name := opts.Config.Server.BasicAuthEnv; name != "" {
+		content := os.Getenv(name)
+		if strings.TrimSpace(content) == "" {
+			return nil, fmt.Errorf("basic_auth_env: $%s is empty or unset", name)
+		}
+		envAuth, err := basicAuthFromEnv(content)
+		if err != nil {
+			return nil, err
+		}
+		if auth == nil {
+			auth = envAuth
+		} else {
+			for u, h := range envAuth.users {
+				auth.users[u] = h
+			}
+		}
+	}
+	var keys *apiKeys
+	if name := opts.Config.Server.APIKeysEnv; name != "" {
+		content := os.Getenv(name)
+		if strings.TrimSpace(content) == "" {
+			return nil, fmt.Errorf("api_keys_env: $%s is empty or unset", name)
+		}
+		k, err := apiKeysFromEnv(content)
+		if err != nil {
+			return nil, err
+		}
+		keys = k
+	}
 	var uiIndex []byte
 	var uiFiles http.Handler
 	if opts.UI != nil {
@@ -92,6 +124,7 @@ func New(opts Options) (*Server, error) {
 		now:     now,
 		trigger: opts.Trigger,
 		auth:    auth,
+		apiKeys: keys,
 		// ~1 trigger/sec sustained, small burst — a manual "Run now" guard, not a
 		// throughput limiter (single-flight already serializes the actual runs).
 		limiter: rate.NewLimiter(rate.Every(time.Second), 5),
@@ -107,8 +140,11 @@ func New(opts Options) (*Server, error) {
 // and Prometheus scrapes are infra endpoints on a trusted network).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	// /healthz stays open even under auth_scope=all so liveness probes need no
+	// credentials; /metrics and the UI are open by default but gated when
+	// auth_scope=all extends basic auth to everything but liveness.
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
-	mux.HandleFunc("GET /metrics", s.handleMetrics)
+	mux.HandleFunc("GET /metrics", s.gateExtra(s.handleMetrics))
 	mux.HandleFunc("GET /api/v1/drills", s.requireAuth(s.handleDrills))
 	mux.HandleFunc("GET /api/v1/drills/{name}/runs", s.requireAuth(s.handleDrillRuns))
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.requireAuth(s.handleRun))
@@ -116,20 +152,30 @@ func (s *Server) Handler() http.Handler {
 	if s.ui != nil {
 		// Catch-all for the SPA; the specific /api, /healthz, /metrics patterns
 		// above win by ServeMux's longest-pattern precedence.
-		mux.HandleFunc("GET /", s.handleUI)
+		mux.HandleFunc("GET /", s.gateExtra(s.handleUI))
 	}
 	return s.recoverer(s.logRequests(mux))
 }
 
-// requireAuth wraps a handler with basic-auth enforcement; a pass-through when no
-// auth file is configured.
+// gateExtra applies basic auth to /metrics and the UI only when auth_scope=all;
+// otherwise they stay open (Prometheus scrapes, anonymous dashboard shell).
+func (s *Server) gateExtra(h http.HandlerFunc) http.HandlerFunc {
+	if s.cfg.Server.AuthScope == "all" {
+		return s.requireAuth(h)
+	}
+	return h
+}
+
+// requireAuth enforces a valid API key or basic-auth credential; a pass-through
+// when no auth is configured (the localhost default).
 func (s *Server) requireAuth(h http.HandlerFunc) http.HandlerFunc {
-	if s.auth == nil {
+	if s.auth == nil && s.apiKeys == nil {
 		return h
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, pass, ok := r.BasicAuth()
-		if !ok || !s.auth.check(user, pass) {
+		if !s.authenticate(r) {
+			// Basic realm so the browser UI still gets a native login prompt; bearer
+			// clients just read the 401.
 			w.Header().Set("WWW-Authenticate", `Basic realm="redrill"`)
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return

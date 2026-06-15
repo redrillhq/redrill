@@ -116,6 +116,21 @@ func TestRetentionParses(t *testing.T) {
 	}
 }
 
+func TestAuthScopeValid(t *testing.T) {
+	t.Parallel()
+	for _, y := range []string{
+		"version: 1\ndata_dir: /v\nscratch: {dir: /s}\nserver: {listen: \":8090\", allow_no_auth: true}\n",
+		"version: 1\ndata_dir: /v\nscratch: {dir: /s}\nserver: {listen: \":8090\", basic_auth_env: REDRILL_AUTH}\n",
+		"version: 1\ndata_dir: /v\nscratch: {dir: /s}\nserver: {listen: \":8090\", auth_scope: all, basic_auth_file: /x}\n",
+		"version: 1\ndata_dir: /v\nscratch: {dir: /s}\nserver: {listen: \":8090\", auth_scope: all, basic_auth_env: REDRILL_AUTH}\n",
+		"version: 1\ndata_dir: /v\nscratch: {dir: /s}\nserver: {listen: \":8090\", auth_scope: all, api_keys_env: REDRILL_KEYS}\n",
+	} {
+		if _, err := Parse([]byte(y)); err != nil {
+			t.Errorf("should validate: %v\n%s", err, y)
+		}
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -147,6 +162,9 @@ func TestParseErrors(t *testing.T) {
 		{"nice io_class bad", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nnice: {io_class: turbo}\n", "io_class"},
 		{"notify event bad", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nnotify: {events: [boom]}\n", "notify.events[0]"},
 		{"server listen bad", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nserver: {listen: noport}\n", "server.listen"},
+		{"auth_scope bad", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nserver: {auth_scope: turbo}\n", "auth_scope"},
+		{"auth_scope all needs auth file", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nserver: {auth_scope: all}\n", "basic_auth_file"},
+		{"listen needs auth", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nserver: {listen: \":8090\"}\n", "without authentication"},
 		{"healthchecks url bad", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nnotify: {healthchecks_url: \"not a url\"}\n", "healthchecks_url"},
 		{"source name missing", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{type: borg, repo: r}]\n", "sources[0].name"},
 		{"source dup name", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}, {name: s, type: borg, repo: r2}]\n", "duplicate source"},

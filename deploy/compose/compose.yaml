@@ -14,6 +14,11 @@ services:
     container_name: redrill
     restart: unless-stopped
     command: ["serve", "-c", "/etc/redrill/config.yaml"]
+    # Auth via env (enable server.basic_auth_env / api_keys_env in the config). Prefer
+    # an env_file or a secret over inline values so credentials stay out of the compose file.
+    # environment:
+    #   REDRILL_BASIC_AUTH: "admin:change-me"
+    #   REDRILL_API_KEYS: "a-long-random-token"
     ports:
       # Web UI + read-only API + /metrics (needs server.listen in the config).
       # Open http://127.0.0.1:8090/ for the dashboard. Bound to localhost — front
@@ -27,6 +32,8 @@ services:
       # - /backups/pg:/backups/pg:ro
       # Secrets as files (borg passphrase, read-only ssh key):
       # - ./secrets:/etc/redrill/secrets:ro
+      # Basic-auth users, when server.basic_auth_file is set (htpasswd -B):
+      # - ./htpasswd:/etc/redrill/htpasswd:ro
 
 volumes:
   redrill-data:

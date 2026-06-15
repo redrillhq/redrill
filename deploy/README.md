@@ -66,13 +66,56 @@ GET  /api/v1/runs/{id}                 # steps, per-check evidence, artifacts
 POST /api/v1/drills/{name}/run         # "Run now" (rate-limited; 409 if busy)
 ```
 
-- **Auth.** Optional `server.basic_auth_file` (htpasswd, **bcrypt only** — `htpasswd -B`)
-  gates `/api/*`; `/healthz` and `/metrics` stay open for probes/scrapes. Basic auth
-  is a convenience — front the daemon with a reverse proxy for TLS. The compose example
-  binds the port to `127.0.0.1` for that reason.
+- **Auth (required when `listen` is set).** redrill refuses to start an unauthenticated
+  HTTP API — configure a credential (see "Exposing redrill" below) or explicitly set
+  `server.allow_no_auth: true` to serve open (private host / authenticating proxy). When
+  auth is on it gates `/api/*`; `server.auth_scope: all` also gates the UI and `/metrics`
+  (`/healthz` always stays open for liveness probes).
 - **Dead-man ping.** Set `notify.healthchecks_url` to have redrill ping a monitor
   (e.g. healthchecks.io) each scheduler cycle, so you're alerted if the daemon itself
   goes down. Set the check's expected period to your drill cadence.
+
+## Exposing redrill on a public URL
+
+The compose example binds to `127.0.0.1` on purpose. To reach redrill from outside
+localhost, **put it behind a reverse proxy that terminates TLS** — basic auth over
+plain HTTP would send credentials in the clear. Drop the published port from
+`compose.yaml` so the daemon is only reachable through the proxy.
+
+**Pick one proxy.** [`compose/Caddyfile.example`](compose/Caddyfile.example) (Caddy,
+auto-HTTPS — recommended) and the nginx block below are two ways to do the *same*
+thing; deploy whichever you already run, not both. Each terminates TLS and restricts
+`/metrics`.
+
+**Where credentials live — pick one place, not both:**
+
+- **In redrill.** Browser login via either `server.basic_auth_file` (a bcrypt htpasswd
+  file, `htpasswd -B -c ./htpasswd admin`, mounted at the path you set — the compose
+  mount is commented out pointing at `/etc/redrill/htpasswd`) or `server.basic_auth_env`
+  (an env var with `user:password` lines — easiest in compose). For scripts, Prometheus,
+  and the MCP server, `server.api_keys_env` holds bearer tokens, sent as
+  `Authorization: Bearer <key>` or `X-API-Key`. `/api/*` accepts a basic credential or a
+  key. Multiple users/keys are independent credentials with the same access (not roles).
+  Add `server.auth_scope: all` to also cover the UI and `/metrics`.
+- **In the proxy** (Caddy `basic_auth` / nginx `auth_basic`): the credentials live in
+  the proxy config and redrill stays open behind it.
+
+**Lock down `/metrics`** regardless — it discloses drill names, proof ages, and SLA
+state (fine on a private network, not public): restrict it at the proxy (allow-list
+below) or set `server.auth_scope: all`.
+
+```nginx
+# nginx alternative to compose/Caddyfile.example (add your `listen 443 ssl` / certs):
+location /metrics {
+    allow 10.0.0.0/8;   # your monitoring network only
+    allow 127.0.0.1;
+    deny all;
+    proxy_pass http://127.0.0.1:8090;
+}
+location / {
+    proxy_pass http://127.0.0.1:8090;
+}
+```
 
 ## After deploying
 

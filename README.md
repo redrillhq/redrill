@@ -172,3 +172,5 @@ A verifier you can't trust is worse than none. On every change the test suite ru
 ## Feedback
 
 Redrill is under active development. Bug reports and ideas are welcome through issues, especially which backup tools you'd want supported next.
+
+Built and maintained by [Andrew Alyamovsky](https://github.com/alyamovsky)

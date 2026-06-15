@@ -13,45 +13,78 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
+  # Frontend gates + build the embedded UI. web/dist is uploaded as an artifact and
+  # consumed by the Go jobs (the binary embeds it via go:embed), so CI is correct
+  # whether or not web/dist is committed.
+  web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - run: make web-lint
+      - run: make web-test
+      - run: ./web/node_modules/.bin/playwright install --with-deps chromium
+      - run: make web-e2e
+      - run: make web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
+
+  lint:
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: web/dist }
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          # No go.sum yet; the module cache holds only golangci-lint, keyed by its pin in the Makefile.
+          # The module cache holds only golangci-lint, keyed by its pin in the Makefile.
           cache-dependency-path: Makefile
       - run: make lint
 
   test:
+    needs: web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: web/dist }
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: false # nothing to cache until go.sum exists
       - run: make test
 
   # Real-engine drills in containers (build tag: integration). Needs Docker; borg tests skip if borg is absent.
   integration:
+    needs: web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: web/dist }
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: false # nothing to cache until go.sum exists
       - run: make test-integration
 
   # The sabotage kit (build tag: sabotage): every fixture must be flagged. Engine fixtures need Docker + borg.
   sabotage:
+    needs: web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: web/dist }
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: false # nothing to cache until go.sum exists
       - run: make test-sabotage

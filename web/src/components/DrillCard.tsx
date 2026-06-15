@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Andrew Alyamovsky
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { DrillView, TriggerOutcome } from '../api'

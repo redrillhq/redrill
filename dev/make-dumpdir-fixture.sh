@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 #
+# Copyright (C) 2026 Andrew Alyamovsky
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+
+#
 # Build a dumpdir fixture for dev e2e drills: a directory of timestamped
 # plain-SQL gzipped pg_dump files (the "nightly pg_dump cron" shape),
 # three generations with backdated mtimes so `pick: newest` is meaningful.

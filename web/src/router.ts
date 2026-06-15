@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Andrew Alyamovsky
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
 import { useSyncExternalStore } from 'react'
 
 // Hash routing keeps the server side trivial: it only ever serves index.html, so

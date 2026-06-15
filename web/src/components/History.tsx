@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Andrew Alyamovsky
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
 import { api } from '../api'
 import { useFetch } from '../useFetch'
 import { Spinner, ErrorBanner, EmptyState, Panel } from './ui'

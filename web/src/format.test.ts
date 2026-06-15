@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Andrew Alyamovsky
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
 import { describe, it, expect } from 'vitest'
 import type { DrillView } from './api'
 import { relativeAge, untilNext, humanBytes, humanDuration, proofState } from './format'

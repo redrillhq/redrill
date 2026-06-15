@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Andrew Alyamovsky
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Package restic reads a restic repository via the restic CLI.
 package restic
 

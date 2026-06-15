@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Andrew Alyamovsky
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 package config
 
 // Secret-bearing fields exist only as *_file / *_env references; there is

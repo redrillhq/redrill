@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Andrew Alyamovsky
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
 -- Migration 0001: initial schema. Forward-only — never edit a
 -- shipped migration; add a new NNNN_*.sql file instead.
 --

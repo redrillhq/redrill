@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 #
+# Copyright (C) 2026 Andrew Alyamovsky
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+
+#
 # Build a deterministic borg fixture repo for dev e2e drills:
 #   sample file tree + seeded postgres dump (custom format), packaged as a
 #   borg repo with two archives (so "newest" selection is meaningful).

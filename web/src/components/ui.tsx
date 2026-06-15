@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Andrew Alyamovsky
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
 import type { ReactNode } from 'react'
 
 export function Spinner({ label = 'Loading…' }: { label?: string }) {

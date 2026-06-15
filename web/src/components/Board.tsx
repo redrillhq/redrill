@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Andrew Alyamovsky
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
 import { useEffect } from 'react'
 import { api } from '../api'
 import { useFetch } from '../useFetch'

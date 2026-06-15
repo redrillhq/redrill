@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 #
+# Copyright (C) 2026 Andrew Alyamovsky
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+
+#
 # dev/drill.sh — manual end-to-end drill runner (dev toolset, kept for the
 # life of the project; see dev/README.md).
 #

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Andrew Alyamovsky
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Package dumpdir reads a directory of dump files (e.g. pg_dump output).
 package dumpdir
 

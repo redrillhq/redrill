@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Andrew Alyamovsky
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
 // Types mirror the JSON shapes served by internal/server (DESIGN §8.3). The UI is
 // a thin client over that public API — every field here has a Go counterpart.
 

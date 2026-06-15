@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Andrew Alyamovsky
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
 import { usePath, parseRoute } from './router'
 import { Board } from './components/Board'
 import { History } from './components/History'

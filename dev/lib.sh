@@ -1,3 +1,8 @@
+#
+# Copyright (C) 2026 Andrew Alyamovsky
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+
 # dev/lib.sh — shared helpers for the redrill dev toolset. Sourced, never executed.
 # Portability target: bash 3.2+ (macOS default) and Linux. Functions only, no side effects.
 

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Andrew Alyamovsky
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Package docker runs sandboxes on the Docker Engine API (and podman's compatible socket).
 package docker
 

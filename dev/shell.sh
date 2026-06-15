@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 #
+# Copyright (C) 2026 Andrew Alyamovsky
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+
+#
 # Enter the redrill dev environment, or run one command inside it.
 # The ONLY host dependency is Docker — borg, postgres client tools, etc. live
 # in the dev image (built here on first use).

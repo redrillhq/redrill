@@ -12,27 +12,27 @@ nice: { cpu: 10, io_class: idle }
 bandwidth_limit: 40MiB
 
 server:
-  listen: ":8090"             # read-only REST API + Prometheus /metrics; omit to disable HTTP.
-  # basic_auth_file: /etc/redrill/htpasswd   # optional; bcrypt entries only (htpasswd -B). Reverse-proxy for TLS.
+  listen: ":8090" # read-only REST API + Prometheus /metrics; omit to disable HTTP.
+  # basic_auth_file: /etc/redrill/htpasswd # optional; bcrypt entries only (htpasswd -B). Reverse-proxy for TLS.
 
 notify:
   urls:
-    - "ntfy://ntfy.example.com/redrill"   # any shoutrrr URL: ntfy, telegram, discord, email, webhook...
+    - "ntfy://ntfy.example.com/redrill" # any shoutrrr URL: ntfy, telegram, discord, email, webhook...
   events: [fail, error, recover, stale]
-  # healthchecks_url: "https://hc-ping.com/your-uuid"   # optional dead-man heartbeat, pinged each scheduler cycle
+  # healthchecks_url: "https://hc-ping.com/your-uuid" # optional dead-man heartbeat, pinged each scheduler cycle
 
 sources:
   - name: pg-dumps
     type: dumpdir
-    path: /backups/pg            # mount this read-only into the container
+    path: /backups/pg # mount this read-only into the container
     pattern: "*.sql.gz"
     pick: newest
 
 drills:
   - name: app-db
     source: pg-dumps
-    schedule: "Sun 05:00"        # cron or human shorthand; plus jitter
-    max_proof_age: 10d           # stale alert if no proof newer than this
+    schedule: "Sun 05:00" # cron or human shorthand; plus jitter
+    max_proof_age: 10d # stale alert if no proof newer than this
     levels:
       l1: { file_min_bytes: 1MiB, compression_test: true, max_age: 36h }
       l3:

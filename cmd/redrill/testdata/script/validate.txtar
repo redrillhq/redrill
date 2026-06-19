@@ -18,9 +18,9 @@ stderr 'no such source'
 ! redrill validate -c badsched.yaml
 stderr 'schedule'
 
-# a missing config file → config error
+# a missing config file → config error, message says it's not found
 ! redrill validate -c does-not-exist.yaml
-stderr 'invalid'
+stderr 'no config file at does-not-exist.yaml'
 
 -- valid.yaml --
 version: 1

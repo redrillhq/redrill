@@ -1,6 +1,6 @@
-# run against a missing config → config error
+# run against a missing config → config error, message says it's not found
 ! redrill run app-db -c does-not-exist.yaml
-stderr 'invalid'
+stderr 'no config file at does-not-exist.yaml'
 
 # run an unknown drill → infra error, message names the drill
 ! redrill run ghost -c valid.yaml

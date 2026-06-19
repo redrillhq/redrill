@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -28,6 +29,57 @@ func TestConfigFileDefault(t *testing.T) {
 	t.Setenv("REDRILL_CONFIG", "/custom/redrill.yaml")
 	if got := configFileDefault(); got != "/custom/redrill.yaml" {
 		t.Errorf("set REDRILL_CONFIG: got %q, want /custom/redrill.yaml", got)
+	}
+}
+
+func TestPrintConfigError(t *testing.T) {
+	t.Parallel()
+	notExist := func(path string) error { return fmt.Errorf("read config %s: %w", path, os.ErrNotExist) }
+	tests := []struct {
+		name    string
+		path    string
+		err     error
+		want    []string
+		notWant []string
+	}{
+		{
+			name: "missing default file names it and points at the override",
+			path: defaultConfigPath,
+			err:  notExist(defaultConfigPath),
+			want: []string{"no config file at " + defaultConfigPath, "the default path", "-c <file>", "$REDRILL_CONFIG"},
+		},
+		{
+			name:    "missing explicit file is reported without the default hint",
+			path:    "/custom/redrill.yaml",
+			err:     notExist("/custom/redrill.yaml"),
+			want:    []string{"no config file at /custom/redrill.yaml"},
+			notWant: []string{"default", "REDRILL_CONFIG"},
+		},
+		{
+			name:    "a malformed file keeps the is-invalid detail",
+			path:    defaultConfigPath,
+			err:     errors.New("data_dir is required"),
+			want:    []string{"is invalid", "data_dir is required"},
+			notWant: []string{"no config file"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var stderr bytes.Buffer
+			printConfigError(&stderr, tt.path, tt.err)
+			got := stderr.String()
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("stderr = %q, want it to contain %q", got, w)
+				}
+			}
+			for _, nw := range tt.notWant {
+				if strings.Contains(got, nw) {
+					t.Errorf("stderr = %q, want it NOT to contain %q", got, nw)
+				}
+			}
+		})
 	}
 }
 

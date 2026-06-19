@@ -46,7 +46,7 @@ func runServe(args []string, _, stderr io.Writer) int {
 		err = extraValidate(cfg)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "redrill: %s is invalid:\n%v\n", *path, err)
+		printConfigError(stderr, *path, err)
 		return 3
 	}
 

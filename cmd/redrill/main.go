@@ -37,6 +37,21 @@ func configFileDefault() string {
 	return defaultConfigPath
 }
 
+// printConfigError reports a failed config load. A missing file gets a short,
+// actionable message pointing at the override; anything else keeps the detail.
+func printConfigError(stderr io.Writer, path string, err error) {
+	if errors.Is(err, os.ErrNotExist) {
+		if path == defaultConfigPath {
+			fmt.Fprintf(stderr, "redrill: no config file at %s (the default path)\n", path)
+			fmt.Fprintln(stderr, "hint: set a config path with -c <file> or $REDRILL_CONFIG")
+		} else {
+			fmt.Fprintf(stderr, "redrill: no config file at %s\n", path)
+		}
+		return
+	}
+	fmt.Fprintf(stderr, "redrill: %s is invalid:\n%v\n", path, err)
+}
+
 // Set at build time via -ldflags.
 var (
 	version = "dev"
@@ -147,7 +162,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 				"errors": errorLines(err),
 			})
 		} else {
-			fmt.Fprintf(stderr, "redrill: %s is invalid:\n%v\n", *path, err)
+			printConfigError(stderr, *path, err)
 		}
 		return 3
 	}
@@ -198,7 +213,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := config.Load(*path)
 	if err != nil {
-		fmt.Fprintf(stderr, "redrill: %s is invalid:\n%v\n", *path, err)
+		printConfigError(stderr, *path, err)
 		return 3
 	}
 	drill, src, ok := findDrill(cfg, name)

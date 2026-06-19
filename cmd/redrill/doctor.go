@@ -50,7 +50,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := config.Load(*path)
 	if err != nil {
-		fmt.Fprintf(stderr, "redrill: %s is invalid:\n%v\n", *path, err)
+		printConfigError(stderr, *path, err)
 		return 3
 	}
 

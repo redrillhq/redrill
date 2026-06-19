@@ -70,7 +70,7 @@ func TestFailErrorVisiblyDistinct(t *testing.T) {
 	if !strings.Contains(ft, "FAILED") || !strings.Contains(et, "ERROR") {
 		t.Errorf("titles not distinct: fail=%q error=%q", ft, et)
 	}
-	if !strings.Contains(fb, "Your backup is the problem") {
+	if !strings.Contains(fb, "The backup is the problem") {
 		t.Errorf("fail body missing backup-fault framing: %q", fb)
 	}
 	if !strings.Contains(eb, "auditor is the problem") {

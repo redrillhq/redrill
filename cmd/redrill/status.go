@@ -35,7 +35,7 @@ type drillStatus struct {
 func runStatus(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	path := fs.String("c", defaultConfigPath, "config file path")
+	path := fs.String("c", configFileDefault(), "config file path (or set $REDRILL_CONFIG)")
 	jsonOut := fs.Bool("json", false, "machine-readable output")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

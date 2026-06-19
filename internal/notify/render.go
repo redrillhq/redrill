@@ -18,12 +18,12 @@ func Render(n Notification) (title, body string) {
 	case EventFail:
 		title = "redrill: " + n.Drill + " restore FAILED"
 		body = verdict(n, "FAILED") +
-			"\nYour backup is the problem — a check found bad data.\n" +
+			"\nThe backup is the problem — a check found bad data.\n" +
 			lastGood(n)
 	case EventError:
 		title = "redrill: " + n.Drill + " drill ERROR"
 		body = verdict(n, "ERROR") +
-			"\nThe auditor is the problem — redrill could not complete the check; your backup is unproven, not (yet) condemned.\n" +
+			"\nThe auditor is the problem — redrill could not complete the check; the backup is unproven, not (yet) condemned.\n" +
 			lastGood(n)
 	case EventStale:
 		title = "redrill: " + n.Drill + " proof STALE"

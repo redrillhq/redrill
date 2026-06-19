@@ -20,6 +20,17 @@ import (
 	"github.com/redrillhq/redrill/internal/store"
 )
 
+func TestConfigFileDefault(t *testing.T) {
+	t.Setenv("REDRILL_CONFIG", "")
+	if got := configFileDefault(); got != defaultConfigPath {
+		t.Errorf("unset REDRILL_CONFIG: got %q, want %q", got, defaultConfigPath)
+	}
+	t.Setenv("REDRILL_CONFIG", "/custom/redrill.yaml")
+	if got := configFileDefault(); got != "/custom/redrill.yaml" {
+		t.Errorf("set REDRILL_CONFIG: got %q, want /custom/redrill.yaml", got)
+	}
+}
+
 // setupStatusConfig writes a config with one dumpdir drill (L1, max_proof_age
 // 10d), returning the config path and its data_dir so a test can pre-seed the store.
 func setupStatusConfig(t *testing.T) (cfgPath, dataDir string) {

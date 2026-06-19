@@ -9,7 +9,7 @@ Go tests (`make test`, `make test-integration`) and the sabotage kit (`make test
 use this when you want to drive the real engines by hand and read a drill report.
 
 **The only host dependency is Docker.** Every engine dep (borg, postgres client tools, zstd,
-ssh) lives in the `redrill-dev` image — nothing gets installed on your machine. The shipped
+ssh) lives in the `redrill-dev` image — nothing gets installed on the host. The shipped
 redrill image bundles its engines the same way.
 
 ## Quickstart
@@ -40,7 +40,7 @@ DUMP_DIR=/work/dumpdir-fixture dev/shell.sh dev/drill.sh
 | `drill.sh` | The e2e loop, borg or dumpdir mode: fetch/restore (sample + DB dump) → postgres sandbox (`network=none`, labeled, removed on exit) → two SQL asserts → `results.md` |
 
 Containers started from inside the dev env (fixture pg, sandbox pg) run as **siblings** on
-your Docker daemon via the mounted socket — nothing is nested. All file transfer into the
+the Docker daemon via the mounted socket — nothing is nested. All file transfer into the
 sandbox goes through `docker cp`/`docker exec`, so no host paths leak into containers.
 
 ## Reproducibility contract
@@ -76,7 +76,7 @@ All pass through `dev/shell.sh` automatically when set on the host, e.g.
 ## Outputs & data lifecycle
 
 Everything generated lives in the `redrill-dev-data` volume, mounted at `/work` — never in
-the repo, never on your host filesystem.
+the repo, never on the host filesystem.
 
 - `/work/scratch/out/results.md` — the auto-filled drill report (timings, sizes, throughput,
   load errors, assert verdicts, discovered paths)
@@ -99,7 +99,7 @@ failed (the backup is bad) · `2` couldn't check (infra).
 
 The same `drill.sh` works against a real Nextcloud AIO repo: run it with a read-only key,
 outside the AIO backup window, let path discovery find `config.php` and the DB dump, and
-override the asserts for your own data:
+override the asserts for custom data:
 
 ```sh
 BORG_REPO="ssh://backup@nas.lan/./borg/nextcloud-aio" \
@@ -112,7 +112,7 @@ dev/shell.sh dev/drill.sh
 (SSH key/known_hosts need mounting into the dev env at that point — extend `shell.sh` then,
 not before.) Results from real data may contain personal information: they stay in the data
 volume; don't commit or share them. Note the verified in-archive paths so you can pin them in
-your real config.
+the real config.
 
 ## Troubleshooting
 

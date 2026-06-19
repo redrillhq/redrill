@@ -21,7 +21,7 @@ import (
 func runHistory(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("history", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	path := fs.String("c", defaultConfigPath, "config file path")
+	path := fs.String("c", configFileDefault(), "config file path (or set $REDRILL_CONFIG)")
 	limit := fs.Int("n", 20, "max number of runs to show")
 	jsonOut := fs.Bool("json", false, "machine-readable output")
 	name, ok, err := parseNameAndFlags(fs, args)

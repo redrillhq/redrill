@@ -1,5 +1,5 @@
 redrill: nextcloud-db drill ERROR
 
 nextcloud-db: L3 ERROR — load: exec: container exited before ready.
-The auditor is the problem — redrill could not complete the check; your backup is unproven, not (yet) condemned.
+The auditor is the problem — redrill could not complete the check; the backup is unproven, not (yet) condemned.
 Last good proof: 2026-05-24 12:00 UTC (21d ago).

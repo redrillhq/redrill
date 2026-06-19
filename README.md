@@ -1,8 +1,8 @@
 # Redrill
 
-**Your backups run every night. Have you ever actually restored one?**
+**Backups run every night. When was one last actually restored?**
 
-Redrill is a self-hosted daemon that proves your backups are restorable by actually restoring them. On a schedule it pulls data out of the backups you already make (Borg repos and Postgres dumps, for now), restores them into a throwaway sandbox, and for databases boots a real instance to check the loaded data. For each dataset you get a line like:
+Redrill is a self-hosted daemon that proves backups are restorable by actually restoring them. On a schedule it pulls data out of the backups other tools already make (Borg repos and Postgres dumps, for now), restores them into a throwaway sandbox, and for databases boots a real instance to check the loaded data. Each dataset gets a line like:
 
 > **last proven restore: 3 days ago** ✅
 
@@ -23,7 +23,7 @@ Every backup tool checks its own integrity, while none of them check whether the
 
 ## Redrill in essence
 
-Redrill is read-only and never modifies your backups. Each drill is configurable: use the backup tool's own integrity check, or fully restore the data and run your own checks. Runs are kept with history, and failures raise an alert.
+Redrill is read-only and never modifies the backups it reads. Each drill is configurable: use the backup tool's own integrity check, or fully restore the data and run custom checks. Runs are kept with history, and failures raise an alert.
 
 ## Verification layers
 
@@ -31,7 +31,7 @@ Redrill is read-only and never modifies your backups. Each drill is configurable
 |------:|--------------|----|
 | **L1 — Integrity** | **Borg:** native `borg check`, snapshot freshness, size-anomaly detection.<br>**pg_dump:** minimum file size, `gzip -t`/`zstd -t` compression test, file freshness (mtime). | Low |
 | **L2 — Restorability** | **Borg:** restores a sample of files into scratch, asserts `path_exists`, newest-file freshness, file-count tolerance vs. the last good run.<br>**pg_dump:** copies the dump into scratch, but for a single dump L1+L3 do the real work. | Moderate (scales with sample size) |
-| **L3 — Usability** | **Borg:** extracts the dump at `extract_path` from the archive, then boots it the same way.<br>**pg_dump:** boots an ephemeral, network-isolated Postgres, loads the dump, runs your `sql` assertions (`select count(*) from users` → `> 0`, `age < 8d`, …). | High (full restore + DB boot) |
+| **L3 — Usability** | **Borg:** extracts the dump at `extract_path` from the archive, then boots it the same way.<br>**pg_dump:** boots an ephemeral, network-isolated Postgres, loads the dump, runs the configured `sql` assertions (`select count(*) from users` → `> 0`, `age < 8d`, …). | High (full restore + DB boot) |
 
 Layers always run sequentially, so if L3 is selected in the config, a failing L2 stops the job from executing.
 
@@ -51,10 +51,10 @@ L3 boots database sandboxes, so it needs a container runtime (Docker or podman).
 git clone https://github.com/redrillhq/redrill
 cd redrill/deploy/compose
 
-# 1. Point the config at your backups and tune the checks.
+# 1. Point the config at the backups and tune the checks.
 $EDITOR config.example.yaml
 
-# 2. In compose.yaml, mount your backup dir read-only and (for L3) the docker socket.
+# 2. In compose.yaml, mount the backup dir read-only and (for L3) the docker socket.
 $EDITOR compose.yaml
 
 # 3. Go.
@@ -62,7 +62,7 @@ docker compose up -d
 docker compose logs -f redrill
 ```
 
-> Prefer not to use Docker? Build the single static binary with `go build ./cmd/redrill` (Go 1.26). You'll need the `borg` binary on the host for Borg sources and a container runtime for L3. Run `redrill doctor` and it tells you exactly what's missing.
+> Prefer not to use Docker? Build the single static binary with `go build ./cmd/redrill` (Go 1.26). It needs the `borg` binary on the host for Borg sources and a container runtime for L3. Run `redrill doctor` to see exactly what's missing.
 
 ### Config example
 
@@ -128,7 +128,7 @@ drills:
 ## Available CLI commands
 
 ```
-redrill validate          # strictly check your config (exit 3 on any problem)
+redrill validate          # strictly check the config (exit 3 on any problem)
 redrill doctor            # preflight: engines, container runtime, scratch space, repo reachability
 redrill run NAME          # run one drill now and stream the step log  (--level l1|l2|l3)
 redrill status            # table: each drill's last run, proof age, next run, SLA state
@@ -137,7 +137,7 @@ redrill serve             # the daemon: scheduler + notifications
 redrill version
 ```
 
-Every command takes `--json`. Exit codes are stable: 0 ok, 1 a drill failed, 2 infra error, 3 bad config. Drop `redrill status` in a terminal and you get the whole picture:
+Every command takes `--json` and resolves its config from `-c`, else `$REDRILL_CONFIG`, else `/etc/redrill/config.yaml`. Exit codes are stable: 0 ok, 1 a drill failed, 2 infra error, 3 bad config. Drop `redrill status` in a terminal for the whole picture:
 
 ```
 DRILL             LAST RUN      PROVEN     NEXT RUN     SLA
@@ -167,8 +167,8 @@ The full annotated schema lives in [`deploy/compose/config.example.yaml`](deploy
 
 ## Trusting the verifier
 
-A verifier you can't trust is worse than none. On every change the test suite runs, including real-engine drills in throwaway containers. Some of those tests feed Redrill deliberately broken backups that are byte-perfect but semantically dead (for example, an empty-but-valid gzip, a dump of the wrong database, or a stale snapshot), and the build fails unless it flags each one.
+A verifier that can't be trusted is worse than none. On every change the test suite runs, including real-engine drills in throwaway containers. Some of those tests feed Redrill deliberately broken backups that are byte-perfect but semantically dead (for example, an empty-but-valid gzip, a dump of the wrong database, or a stale snapshot), and the build fails unless it flags each one.
 
 ## Feedback
 
-Redrill is under active development. Bug reports and ideas are welcome through issues, especially which backup tools you'd want supported next.
+Redrill is under active development. Bug reports and ideas are welcome through issues, especially which backup tools should be supported next.

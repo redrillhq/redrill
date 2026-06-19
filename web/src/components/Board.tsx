@@ -22,7 +22,7 @@ export function Board() {
 
   const drills = data ?? []
   if (drills.length === 0) {
-    return <EmptyState>No drills configured. Add some to your config and reload.</EmptyState>
+    return <EmptyState>No drills configured. Add some to the config and reload.</EmptyState>
   }
 
   const now = Date.now()

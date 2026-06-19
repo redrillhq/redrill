@@ -29,6 +29,14 @@ import (
 
 const defaultConfigPath = "/etc/redrill/config.yaml"
 
+// configFileDefault is the -c flag's default, honoring $REDRILL_CONFIG.
+func configFileDefault() string {
+	if p := os.Getenv("REDRILL_CONFIG"); p != "" {
+		return p
+	}
+	return defaultConfigPath
+}
+
 // Set at build time via -ldflags.
 var (
 	version = "dev"
@@ -36,7 +44,7 @@ var (
 	date    = "unknown"
 )
 
-const usage = `redrill — scheduled restore drills for your backups
+const usage = `redrill — scheduled restore drills for backups
 
 Usage:
   redrill <command> [flags]
@@ -116,7 +124,7 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 func runValidate(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	path := fs.String("c", defaultConfigPath, "config file path")
+	path := fs.String("c", configFileDefault(), "config file path (or set $REDRILL_CONFIG)")
 	jsonOut := fs.Bool("json", false, "machine-readable output")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -173,7 +181,7 @@ func writeJSON(w io.Writer, v any) {
 func runRun(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	path := fs.String("c", defaultConfigPath, "config file path")
+	path := fs.String("c", configFileDefault(), "config file path (or set $REDRILL_CONFIG)")
 	level := fs.String("level", "", "run only this level (l1|l2|l3)")
 	jsonOut := fs.Bool("json", false, "machine-readable output")
 	name, ok, err := parseNameAndFlags(fs, args)

@@ -1,5 +1,5 @@
 redrill: app-db drill ERROR
 
 app-db: L1 ERROR — dumpdir /backups/pg: no such file or directory.
-The auditor is the problem — redrill could not complete the check; your backup is unproven, not (yet) condemned.
+The auditor is the problem — redrill could not complete the check; the backup is unproven, not (yet) condemned.
 Last good proof: never.

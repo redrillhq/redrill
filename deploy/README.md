@@ -73,7 +73,7 @@ POST /api/v1/drills/{name}/run         # "Run now" (rate-limited; 409 if busy)
   (`/healthz` always stays open for liveness probes).
 - **Dead-man ping.** Set `notify.healthchecks_url` to have redrill ping a monitor
   (e.g. healthchecks.io) each scheduler cycle, so you're alerted if the daemon itself
-  goes down. Set the check's expected period to your drill cadence.
+  goes down. Set the check's expected period to the drill cadence.
 
 ## Exposing redrill on a public URL
 
@@ -105,9 +105,9 @@ state (fine on a private network, not public): restrict it at the proxy (allow-l
 below) or set `server.auth_scope: all`.
 
 ```nginx
-# nginx alternative to compose/Caddyfile.example (add your `listen 443 ssl` / certs):
+# nginx alternative to compose/Caddyfile.example (add the `listen 443 ssl` / certs):
 location /metrics {
-    allow 10.0.0.0/8;   # your monitoring network only
+    allow 10.0.0.0/8;   # the monitoring network only
     allow 127.0.0.1;
     deny all;
     proxy_pass http://127.0.0.1:8090;

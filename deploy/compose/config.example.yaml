@@ -25,7 +25,7 @@ notify:
   urls:
     - "ntfy://ntfy.example.com/redrill" # any shoutrrr URL: ntfy, telegram, discord, email, webhook...
   events: [fail, error, recover, stale]
-  # healthchecks_url: "https://hc-ping.com/your-uuid" # optional dead-man heartbeat, pinged each scheduler cycle
+  # healthchecks_url: "https://hc-ping.com/<uuid>" # optional dead-man heartbeat, pinged each scheduler cycle
 
 sources:
   - name: pg-dumps

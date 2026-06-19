@@ -1,4 +1,4 @@
-# Example redrill deployment. Point the volumes at your backups (read-only) and
+# Example redrill deployment. Point the volumes at the backups (read-only) and
 # secrets, then:  docker compose up -d
 #
 # L3 (database sandbox) drills need the host container runtime, hence the docker

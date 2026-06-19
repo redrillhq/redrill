@@ -33,7 +33,7 @@ import (
 func runServe(args []string, _, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	path := fs.String("c", defaultConfigPath, "config file path")
+	path := fs.String("c", configFileDefault(), "config file path (or set $REDRILL_CONFIG)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0

@@ -17,8 +17,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/time/rate"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 var testNow = time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)

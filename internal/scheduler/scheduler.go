@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/config"
 )
 
 // Clock is injected so tests are deterministic.

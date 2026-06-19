@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/driver"
+	"github.com/redrillhq/redrill/internal/driver"
 )
 
 // Real-engine tests against restic. Test setup writes the fixture repo (restic

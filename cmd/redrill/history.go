@@ -14,8 +14,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 func runHistory(args []string, stdout, stderr io.Writer) int {

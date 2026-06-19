@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/driver"
+	"github.com/redrillhq/redrill/internal/driver"
 )
 
 // Runner runs a command, returning stdout, stderr, and exit code. err is non-nil

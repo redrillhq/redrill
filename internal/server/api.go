@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/scheduler"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/scheduler"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {

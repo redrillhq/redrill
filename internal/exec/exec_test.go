@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/checks"
-	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/checks"
+	"github.com/redrillhq/redrill/internal/config"
 )
 
 var base = time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)

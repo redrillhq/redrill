@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/driver"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/driver"
 )
 
 // selectSample picks paths to restore for L2: every file under an include_path,

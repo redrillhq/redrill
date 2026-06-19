@@ -8,7 +8,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/alyamovsky/redrill/internal/sandbox"
+	"github.com/redrillhq/redrill/internal/sandbox"
 )
 
 type fakeSandbox struct {

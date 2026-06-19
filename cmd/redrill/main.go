@@ -19,12 +19,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/exec"
-	"github.com/alyamovsky/redrill/internal/orchestrate"
-	"github.com/alyamovsky/redrill/internal/sandbox/docker"
-	"github.com/alyamovsky/redrill/internal/scheduler"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/exec"
+	"github.com/redrillhq/redrill/internal/orchestrate"
+	"github.com/redrillhq/redrill/internal/sandbox/docker"
+	"github.com/redrillhq/redrill/internal/scheduler"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 const defaultConfigPath = "/etc/redrill/config.yaml"

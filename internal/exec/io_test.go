@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/driver/borg"
+	"github.com/redrillhq/redrill/internal/driver/borg"
 )
 
 func TestDecorate(t *testing.T) {

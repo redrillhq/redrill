@@ -10,7 +10,7 @@ services:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
     # Or pin a released image instead of building from source:
-    # image: ghcr.io/alyamovsky/redrill:latest
+    # image: ghcr.io/redrillhq/redrill:latest
     container_name: redrill
     restart: unless-stopped
     command: ["serve", "-c", "/etc/redrill/config.yaml"]

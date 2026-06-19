@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/checks"
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/exec"
-	"github.com/alyamovsky/redrill/internal/notify"
-	"github.com/alyamovsky/redrill/internal/orchestrate"
-	"github.com/alyamovsky/redrill/internal/scheduler"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/checks"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/exec"
+	"github.com/redrillhq/redrill/internal/notify"
+	"github.com/redrillhq/redrill/internal/orchestrate"
+	"github.com/redrillhq/redrill/internal/scheduler"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 // ioPolicy maps the config's IO-discipline knobs to the executor's policy.

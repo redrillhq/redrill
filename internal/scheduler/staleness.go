@@ -6,7 +6,7 @@ package scheduler
 import (
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/config"
 )
 
 // Stale fires on a proof existing, not on drills running, so it fires even when

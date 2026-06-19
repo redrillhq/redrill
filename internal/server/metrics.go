@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/scheduler"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/scheduler"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 // handleMetrics renders the Prometheus text exposition format. Every value is

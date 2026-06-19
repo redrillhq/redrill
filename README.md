@@ -48,7 +48,7 @@ Layers always run sequentially, so if L3 is selected in the config, a failing L2
 L3 boots database sandboxes, so it needs a container runtime (Docker or podman). Without one, L1/L2 still run and L3 reports `skipped` rather than passing.
 
 ```bash
-git clone https://github.com/alyamovsky/redrill
+git clone https://github.com/redrillhq/redrill
 cd redrill/deploy/compose
 
 # 1. Point the config at your backups and tune the checks.

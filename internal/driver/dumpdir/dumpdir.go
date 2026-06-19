@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/alyamovsky/redrill/internal/driver"
+	"github.com/redrillhq/redrill/internal/driver"
 )
 
 type Driver struct {

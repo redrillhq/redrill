@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/fixtures"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/fixtures"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 // Real-engine happy-path and cry-wolf (near-pass) drills — the must-pass side of

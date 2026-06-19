@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/exec"
-	"github.com/alyamovsky/redrill/internal/fixtures"
-	"github.com/alyamovsky/redrill/internal/scheduler"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/exec"
+	"github.com/redrillhq/redrill/internal/fixtures"
+	"github.com/redrillhq/redrill/internal/scheduler"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 // soakDrill is a dumpdir L1 drill with no freshness check, so it passes on every

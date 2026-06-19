@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	exe "github.com/alyamovsky/redrill/internal/exec"
-	"github.com/alyamovsky/redrill/internal/sandbox/docker"
+	"github.com/redrillhq/redrill/internal/config"
+	exe "github.com/redrillhq/redrill/internal/exec"
+	"github.com/redrillhq/redrill/internal/sandbox/docker"
 )
 
 // Shared real-engine scaffolding for the integration happy-path drills and the

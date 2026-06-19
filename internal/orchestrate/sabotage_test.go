@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/checks"
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/fixtures"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/checks"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/fixtures"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 // The sabotage kit: each fixture is a "perfect cron, dead backup" that engines'

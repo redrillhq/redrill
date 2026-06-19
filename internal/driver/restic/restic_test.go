@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alyamovsky/redrill/internal/driver"
+	"github.com/redrillhq/redrill/internal/driver"
 )
 
 type fakeRunner struct {

@@ -30,27 +30,27 @@ linters:
             - "**/internal/checks/**"
             - "**/internal/sandbox/**"
           deny:
-            - pkg: github.com/alyamovsky/redrill/internal/store
+            - pkg: github.com/redrillhq/redrill/internal/store
               desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
-            - pkg: github.com/alyamovsky/redrill/internal/orchestrate
+            - pkg: github.com/redrillhq/redrill/internal/orchestrate
               desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
-            - pkg: github.com/alyamovsky/redrill/internal/server
+            - pkg: github.com/redrillhq/redrill/internal/server
               desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
-            - pkg: github.com/alyamovsky/redrill/internal/notify
+            - pkg: github.com/redrillhq/redrill/internal/notify
               desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
-            - pkg: github.com/alyamovsky/redrill/internal/scheduler
+            - pkg: github.com/redrillhq/redrill/internal/scheduler
               desc: drivers/checks/sandboxes stay stateless and remotable through the Executor seam (ARCHITECTURE.md import rules)
         leaf-config:
           files:
             - "**/internal/config/**"
           deny:
-            - pkg: github.com/alyamovsky/redrill/internal
+            - pkg: github.com/redrillhq/redrill/internal
               desc: internal/config is a leaf — it imports no other redrill package
         leaf-redact:
           files:
             - "**/internal/redact/**"
           deny:
-            - pkg: github.com/alyamovsky/redrill/internal
+            - pkg: github.com/redrillhq/redrill/internal
               desc: internal/redact is a leaf — it imports no other redrill package
         no-cgo-sqlite:
           files:
@@ -105,7 +105,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/alyamovsky/redrill
+        - github.com/redrillhq/redrill
   exclusions:
     paths:
       - web/node_modules

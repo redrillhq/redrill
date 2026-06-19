@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/sandbox"
+	"github.com/redrillhq/redrill/internal/sandbox"
 )
 
 func newRuntime(t *testing.T) *Runtime {

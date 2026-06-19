@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 // setupStatusConfig writes a config with one dumpdir drill (L1, max_proof_age

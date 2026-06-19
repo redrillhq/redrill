@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/driver"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/driver"
 )
 
 func sampleFiles() []driver.FileEntry {

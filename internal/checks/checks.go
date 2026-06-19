@@ -7,7 +7,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/sandbox"
+	"github.com/redrillhq/redrill/internal/sandbox"
 )
 
 // skipped is a run state, not a check result.

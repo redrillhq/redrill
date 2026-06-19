@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/checks"
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/notify"
-	"github.com/alyamovsky/redrill/internal/orchestrate"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/checks"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/notify"
+	"github.com/redrillhq/redrill/internal/orchestrate"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 type captureSender struct {

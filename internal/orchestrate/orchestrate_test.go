@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/exec"
-	"github.com/alyamovsky/redrill/internal/fixtures"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/exec"
+	"github.com/redrillhq/redrill/internal/fixtures"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 var base = fixtures.Epoch

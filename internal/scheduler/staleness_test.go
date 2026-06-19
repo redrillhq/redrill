@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/config"
 )
 
 func TestStale(t *testing.T) {

@@ -21,7 +21,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 
-	"github.com/alyamovsky/redrill/internal/sandbox"
+	"github.com/redrillhq/redrill/internal/sandbox"
 )
 
 type Runtime struct {

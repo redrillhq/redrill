@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 func TestWriteExposition(t *testing.T) {

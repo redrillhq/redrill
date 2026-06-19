@@ -1,4 +1,4 @@
-module github.com/alyamovsky/redrill
+module github.com/redrillhq/redrill
 
 go 1.26.0
 

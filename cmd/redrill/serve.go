@@ -19,15 +19,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/exec"
-	"github.com/alyamovsky/redrill/internal/notify"
-	"github.com/alyamovsky/redrill/internal/orchestrate"
-	"github.com/alyamovsky/redrill/internal/sandbox/docker"
-	"github.com/alyamovsky/redrill/internal/scheduler"
-	"github.com/alyamovsky/redrill/internal/server"
-	"github.com/alyamovsky/redrill/internal/store"
-	"github.com/alyamovsky/redrill/web"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/exec"
+	"github.com/redrillhq/redrill/internal/notify"
+	"github.com/redrillhq/redrill/internal/orchestrate"
+	"github.com/redrillhq/redrill/internal/sandbox/docker"
+	"github.com/redrillhq/redrill/internal/scheduler"
+	"github.com/redrillhq/redrill/internal/server"
+	"github.com/redrillhq/redrill/internal/store"
+	"github.com/redrillhq/redrill/web"
 )
 
 func runServe(args []string, _, stderr io.Writer) int {

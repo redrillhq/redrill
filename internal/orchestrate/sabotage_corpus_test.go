@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alyamovsky/redrill/internal/fixtures"
+	"github.com/redrillhq/redrill/internal/fixtures"
 )
 
 // Broadened sabotage corpus (beyond the canonical six in sabotage_test.go):

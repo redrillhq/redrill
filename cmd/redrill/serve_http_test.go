@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/config"
 )
 
 // freeAddr binds an ephemeral port, then frees it so the daemon can claim it.

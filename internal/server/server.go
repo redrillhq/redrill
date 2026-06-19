@@ -23,8 +23,8 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/store"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 // ErrBusy is returned by a TriggerFunc when a run already holds the single-flight

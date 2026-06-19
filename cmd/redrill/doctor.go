@@ -17,9 +17,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/exec"
-	"github.com/alyamovsky/redrill/internal/sandbox/docker"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/exec"
+	"github.com/redrillhq/redrill/internal/sandbox/docker"
 )
 
 type doctorStatus string

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alyamovsky/redrill/internal/checks"
-	"github.com/alyamovsky/redrill/internal/config"
-	"github.com/alyamovsky/redrill/internal/redact"
-	"github.com/alyamovsky/redrill/internal/sandbox"
+	"github.com/redrillhq/redrill/internal/checks"
+	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/redact"
+	"github.com/redrillhq/redrill/internal/sandbox"
 )
 
 type fakeSandbox struct {

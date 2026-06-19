@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alyamovsky/redrill/internal/driver"
+	"github.com/redrillhq/redrill/internal/driver"
 )
 
 var base = time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)

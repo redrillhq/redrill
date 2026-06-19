@@ -11,3 +11,4 @@ tmp
 coverage.out
 dev/config*.yaml
 **/.DS_Store
+var

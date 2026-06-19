@@ -3,3 +3,5 @@
 /tmp/
 /dev/config*.yaml
 coverage.out
+var/
+tmp/

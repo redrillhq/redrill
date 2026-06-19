@@ -1,0 +1,23 @@
+# REDRILL_CONFIG supplies the config path when -c is omitted
+env REDRILL_CONFIG=$WORK/cfg.yaml
+redrill validate
+stdout 'is valid'
+
+# an explicit -c overrides REDRILL_CONFIG (even when the env path is bad)
+env REDRILL_CONFIG=$WORK/missing.yaml
+redrill validate -c cfg.yaml
+stdout 'is valid'
+
+-- cfg.yaml --
+version: 1
+data_dir: /var/lib/redrill
+scratch: {dir: /var/lib/redrill/scratch}
+sources:
+  - {name: dumps, type: dumpdir, path: /backups, pattern: "*.sql.gz"}
+drills:
+  - name: app-db
+    source: dumps
+    schedule: "Sun 05:00"
+    max_proof_age: 10d
+    levels:
+      l1: {file_min_bytes: 1MiB, compression_test: true, max_age: 36h}

@@ -130,7 +130,7 @@ drills:
 ```
 redrill validate          # strictly check the config (exit 3 on any problem)
 redrill doctor            # preflight: engines, container runtime, scratch space, repo reachability
-redrill run NAME          # run one drill now and stream the step log  (--level l1|l2|l3)
+redrill run [NAME]        # run a drill now: a NAME, --all, or pick interactively  (--level l1|l2|l3)
 redrill status            # table: each drill's last run, proof age, next run, SLA state
 redrill history NAME      # past runs with verdicts and durations      (-n 20)
 redrill serve             # the daemon: scheduler + notifications

@@ -290,9 +290,14 @@ drills: [{name: app-db, source: dumps, schedule: "x", levels: {l1: {max_age: 36h
 
 	t.Run("missing NAME exits 2", func(t *testing.T) {
 		t.Parallel()
+		cfg := setupRunConfig(t, "x", time.Now())
 		var stdout, stderr bytes.Buffer
-		if got := run([]string{"run"}, &stdout, &stderr); got != 2 {
-			t.Fatalf("exit = %d, want 2", got)
+		// --json forces the non-interactive path, so no TTY picker is attempted.
+		if got := run([]string{"run", "--json", "-c", cfg}, &stdout, &stderr); got != 2 {
+			t.Fatalf("exit = %d, want 2 (stderr %q)", got, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "requires a drill NAME") {
+			t.Errorf("stderr = %q, want 'requires a drill NAME'", stderr.String())
 		}
 	})
 

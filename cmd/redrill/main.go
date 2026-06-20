@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,6 +54,19 @@ func printConfigError(stderr io.Writer, path string, err error) {
 	fmt.Fprintf(stderr, "redrill: %s is invalid:\n%v\n", path, err)
 }
 
+// printDrillNames lists the drills defined in cfg, to help pick a NAME.
+func printDrillNames(w io.Writer, cfg *config.Config, path string) {
+	if len(cfg.Drills) == 0 {
+		fmt.Fprintf(w, "no drills configured in %s\n", path)
+		return
+	}
+	names := make([]string, len(cfg.Drills))
+	for i := range cfg.Drills {
+		names[i] = cfg.Drills[i].Name
+	}
+	fmt.Fprintf(w, "configured drills: %s\n", strings.Join(names, ", "))
+}
+
 // Set at build time via -ldflags.
 var (
 	version = "dev"
@@ -66,7 +81,7 @@ Usage:
 
 Commands:
   validate   strictly check a config file
-  run        run one drill now and print the result
+  run        run a drill now: NAME, --all, or pick interactively
   status     show each drill's last run, proof age, next run, and SLA state
   history    show a drill's past runs
   serve      run the scheduler daemon
@@ -198,6 +213,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	path := fs.String("c", configFileDefault(), "config file path (or set $REDRILL_CONFIG)")
 	level := fs.String("level", "", "run only this level (l1|l2|l3)")
+	all := fs.Bool("all", false, "run every configured drill, sequentially")
 	jsonOut := fs.Bool("json", false, "machine-readable output")
 	name, ok, err := parseNameAndFlags(fs, args)
 	if err != nil {
@@ -206,20 +222,30 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		}
 		return 2
 	}
-	if !ok {
-		fmt.Fprintln(stderr, "redrill: run requires a drill NAME")
-		return 2
-	}
 
 	cfg, err := config.Load(*path)
 	if err != nil {
 		printConfigError(stderr, *path, err)
 		return 3
 	}
-	drill, src, ok := findDrill(cfg, name)
-	if !ok {
-		fmt.Fprintf(stderr, "redrill: no drill named %q in %s\n", name, *path)
-		return 2
+
+	// Resolve which drills to run: --all, the named one, or an interactive pick.
+	names, interactive, code := selectDrills(stderr, cfg, *path, name, ok, *all)
+	switch {
+	case interactive:
+		// A picker only makes sense on a terminal; cron/scripts/--json require a NAME.
+		if *jsonOut || !isTTY(os.Stdin) {
+			fmt.Fprintln(stderr, "redrill: run requires a drill NAME")
+			printDrillNames(stderr, cfg, *path)
+			return 2
+		}
+		picked, c := pickDrill(os.Stdin, stdout, cfg)
+		if picked == "" {
+			return c
+		}
+		names = []string{picked}
+	case len(names) == 0:
+		return code
 	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
@@ -244,22 +270,111 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		executor.WithSandbox(rt)
 	}
 	o := orchestrate.New(st, executor, func() time.Time { return time.Now().UTC() })
-	opts := orchestrate.RunOptions{Trigger: store.TriggerManual, Level: *level, Scratch: cfg.Scratch}
-	if !*jsonOut {
-		opts.Report = func(out orchestrate.LevelOutcome) { printLevel(stdout, out) }
-	}
-	res, err := o.Run(ctx, *drill, *src, opts)
-	if err != nil {
-		fmt.Fprintf(stderr, "redrill: %v\n", err)
-		return 2
+
+	// Run each selected drill, tracking the worst result for the exit code.
+	worst := store.ResultPass
+	results := make([]any, 0, len(names))
+	for _, n := range names {
+		drill, src, _ := findDrill(cfg, n) // n came from cfg, so it always resolves
+		if len(names) > 1 && !*jsonOut {
+			fmt.Fprintf(stdout, "== %s ==\n", n)
+		}
+		opts := orchestrate.RunOptions{Trigger: store.TriggerManual, Level: *level, Scratch: cfg.Scratch}
+		if !*jsonOut {
+			opts.Report = func(out orchestrate.LevelOutcome) { printLevel(stdout, out) }
+		}
+		res, rerr := o.Run(ctx, *drill, *src, opts)
+		if rerr != nil {
+			fmt.Fprintf(stderr, "redrill: %s: %v\n", n, rerr)
+			worst = worseResult(worst, store.ResultError)
+			continue
+		}
+		if *jsonOut {
+			results = append(results, runResultJSON(n, res))
+		} else {
+			fmt.Fprintf(stdout, "redrill: %s → %s (reached %s, run %d)\n",
+				n, strings.ToUpper(string(res.Status)), res.LevelReached, res.RunID)
+		}
+		worst = worseResult(worst, res.Status)
 	}
 	if *jsonOut {
-		writeJSON(stdout, runResultJSON(name, res))
-	} else {
-		fmt.Fprintf(stdout, "redrill: %s → %s (reached %s, run %d)\n",
-			name, strings.ToUpper(string(res.Status)), res.LevelReached, res.RunID)
+		if *all {
+			writeJSON(stdout, results) // an array, one entry per drill
+		} else if len(results) > 0 {
+			writeJSON(stdout, results[0]) // a single drill stays a bare object
+		}
 	}
-	return resultExit(res.Status)
+	return resultExit(worst)
+}
+
+// selectDrills decides which drills `run` should execute from its flags: every
+// drill (--all), the named one, or — with neither — interactive=true so the
+// caller can prompt. A zero-length, non-interactive result means stop with code.
+func selectDrills(stderr io.Writer, cfg *config.Config, path, name string, haveName, all bool) (names []string, interactive bool, code int) {
+	switch {
+	case all:
+		if haveName {
+			fmt.Fprintln(stderr, "redrill: run --all takes no drill NAME")
+			return nil, false, 2
+		}
+		if len(cfg.Drills) == 0 {
+			printDrillNames(stderr, cfg, path)
+			return nil, false, 2
+		}
+		out := make([]string, len(cfg.Drills))
+		for i := range cfg.Drills {
+			out[i] = cfg.Drills[i].Name
+		}
+		return out, false, 0
+	case haveName:
+		if _, _, ok := findDrill(cfg, name); !ok {
+			fmt.Fprintf(stderr, "redrill: no drill named %q in %s\n", name, path)
+			printDrillNames(stderr, cfg, path)
+			return nil, false, 2
+		}
+		return []string{name}, false, 0
+	default:
+		if len(cfg.Drills) == 0 {
+			fmt.Fprintln(stderr, "redrill: run requires a drill NAME")
+			printDrillNames(stderr, cfg, path)
+			return nil, false, 2
+		}
+		return nil, true, 0
+	}
+}
+
+// pickDrill prompts for one drill from cfg, reading the choice from in. It
+// returns the chosen name, or "" with an exit code when nothing is selected.
+func pickDrill(in io.Reader, out io.Writer, cfg *config.Config) (string, int) {
+	fmt.Fprintln(out, "select a drill to run:")
+	for i := range cfg.Drills {
+		fmt.Fprintf(out, "  %d) %s\n", i+1, cfg.Drills[i].Name)
+	}
+	fmt.Fprint(out, "drill number (blank to cancel): ")
+	line, _ := bufio.NewReader(in).ReadString('\n')
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", 0
+	}
+	n, err := strconv.Atoi(line)
+	if err != nil || n < 1 || n > len(cfg.Drills) {
+		fmt.Fprintf(out, "no drill matches %q\n", line)
+		return "", 2
+	}
+	return cfg.Drills[n-1].Name, 0
+}
+
+// worseResult returns the more severe of two results — fail outranks error
+// outranks pass — matching the per-run aggregation in orchestrate.
+func worseResult(a, b store.Result) store.Result {
+	switch {
+	case a == store.ResultFail || b == store.ResultFail:
+		return store.ResultFail
+	case a == store.ResultError || b == store.ResultError:
+		return store.ResultError
+	default:
+		return store.ResultPass
+	}
 }
 
 func findDrill(cfg *config.Config, name string) (*config.Drill, *config.Source, bool) {

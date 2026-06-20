@@ -2,9 +2,19 @@
 ! redrill run app-db -c does-not-exist.yaml
 stderr 'no config file at does-not-exist.yaml'
 
-# run an unknown drill → infra error, message names the drill
+# run with no NAME off a TTY (as here) can't prompt, so it requires a NAME + lists them
+! redrill run -c valid.yaml
+stderr 'run requires a drill NAME'
+stderr 'configured drills: app-db, photos'
+
+# an unknown drill name also lists what's available
 ! redrill run ghost -c valid.yaml
 stderr 'no drill named'
+stderr 'configured drills: app-db, photos'
+
+# --all runs every drill, so it takes no NAME
+! redrill run --all app-db -c valid.yaml
+stderr 'run --all takes no drill NAME'
 
 -- valid.yaml --
 version: 1
@@ -14,3 +24,4 @@ sources:
   - {name: dumps, type: dumpdir, path: /backups, pattern: "*.sql.gz"}
 drills:
   - {name: app-db, source: dumps, schedule: "@daily", levels: {l1: {file_min_bytes: 1}}}
+  - {name: photos, source: dumps, schedule: "@daily", levels: {l1: {file_min_bytes: 1}}}

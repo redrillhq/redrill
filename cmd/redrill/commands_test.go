@@ -32,6 +32,119 @@ func TestConfigFileDefault(t *testing.T) {
 	}
 }
 
+func TestPrintDrillNames(t *testing.T) {
+	t.Parallel()
+	t.Run("lists names in config order", func(t *testing.T) {
+		t.Parallel()
+		var w bytes.Buffer
+		cfg := &config.Config{Drills: []config.Drill{{Name: "app-db"}, {Name: "photos"}}}
+		printDrillNames(&w, cfg, "/etc/redrill/config.yaml")
+		if got, want := w.String(), "configured drills: app-db, photos\n"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+	t.Run("notes when none are configured", func(t *testing.T) {
+		t.Parallel()
+		var w bytes.Buffer
+		printDrillNames(&w, &config.Config{}, "/etc/redrill/config.yaml")
+		if got, want := w.String(), "no drills configured in /etc/redrill/config.yaml\n"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+}
+
+func TestSelectDrills(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{
+		Sources: []config.Source{{Name: "s"}},
+		Drills:  []config.Drill{{Name: "a", Source: "s"}, {Name: "b", Source: "s"}},
+	}
+	empty := &config.Config{}
+	tests := []struct {
+		name      string
+		cfg       *config.Config
+		drillName string
+		haveName  bool
+		all       bool
+		wantNames string // comma-joined
+		wantInter bool
+		wantCode  int
+		wantErr   string
+	}{
+		{name: "all returns every drill", cfg: cfg, all: true, wantNames: "a,b"},
+		{name: "all rejects a NAME", cfg: cfg, all: true, drillName: "a", haveName: true, wantCode: 2, wantErr: "takes no drill NAME"},
+		{name: "all with no drills", cfg: empty, all: true, wantCode: 2, wantErr: "no drills configured"},
+		{name: "known name", cfg: cfg, drillName: "b", haveName: true, wantNames: "b"},
+		{name: "unknown name lists drills", cfg: cfg, drillName: "ghost", haveName: true, wantCode: 2, wantErr: "no drill named"},
+		{name: "no name signals interactive", cfg: cfg, wantInter: true},
+		{name: "no name, no drills requires a NAME", cfg: empty, wantCode: 2, wantErr: "requires a drill NAME"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var stderr bytes.Buffer
+			names, inter, code := selectDrills(&stderr, tt.cfg, "/c.yaml", tt.drillName, tt.haveName, tt.all)
+			if got := strings.Join(names, ","); got != tt.wantNames {
+				t.Errorf("names = %q, want %q", got, tt.wantNames)
+			}
+			if inter != tt.wantInter {
+				t.Errorf("interactive = %v, want %v", inter, tt.wantInter)
+			}
+			if !tt.wantInter && code != tt.wantCode {
+				t.Errorf("code = %d, want %d", code, tt.wantCode)
+			}
+			if tt.wantErr != "" && !strings.Contains(stderr.String(), tt.wantErr) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestPickDrill(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{Drills: []config.Drill{{Name: "a"}, {Name: "b"}, {Name: "c"}}}
+	tests := []struct {
+		name     string
+		input    string
+		wantName string
+		wantCode int
+	}{
+		{name: "valid selection", input: "2\n", wantName: "b"},
+		{name: "first", input: "1\n", wantName: "a"},
+		{name: "blank cancels cleanly", input: "\n"},
+		{name: "eof cancels cleanly", input: ""},
+		{name: "out of range", input: "9\n", wantCode: 2},
+		{name: "not a number", input: "xyz\n", wantCode: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var out bytes.Buffer
+			name, code := pickDrill(strings.NewReader(tt.input), &out, cfg)
+			if name != tt.wantName {
+				t.Errorf("name = %q, want %q", name, tt.wantName)
+			}
+			if name == "" && code != tt.wantCode {
+				t.Errorf("code = %d, want %d", code, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestWorseResult(t *testing.T) {
+	t.Parallel()
+	p, f, e := store.ResultPass, store.ResultFail, store.ResultError
+	cases := []struct{ a, b, want store.Result }{
+		{p, p, p}, {p, f, f}, {f, p, f}, {p, e, e}, {e, p, e},
+		{f, e, f}, {e, f, f}, {f, f, f}, {e, e, e}, // fail outranks error
+	}
+	for _, c := range cases {
+		if got := worseResult(c.a, c.b); got != c.want {
+			t.Errorf("worseResult(%v, %v) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
 func TestPrintConfigError(t *testing.T) {
 	t.Parallel()
 	notExist := func(path string) error { return fmt.Errorf("read config %s: %w", path, os.ErrNotExist) }

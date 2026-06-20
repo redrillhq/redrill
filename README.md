@@ -2,7 +2,7 @@
 
 **Backups run every night. When was one last actually restored?**
 
-Redrill is a self-hosted daemon that proves backups are restorable by actually restoring them. On a schedule it pulls data out of the backups other tools already make (Borg repos and Postgres dumps, for now), restores them into a throwaway sandbox, and for databases boots a real instance to check the loaded data. Each dataset gets a line like:
+Redrill is a self-hosted daemon that proves backups are restorable by actually restoring them. On a schedule it pulls data out of the backups other tools already make (Borg and restic repos and Postgres dumps, for now), restores them into a throwaway sandbox, and for databases boots a real instance to check the loaded data. Each dataset gets a line like:
 
 > **last proven restore: 3 days ago** ✅
 
@@ -29,9 +29,9 @@ Redrill is read-only and never modifies the backups it reads. Each drill is conf
 
 | Layer | What it does | IO |
 |------:|--------------|----|
-| **L1 — Integrity** | **Borg:** native `borg check`, snapshot freshness, size-anomaly detection.<br>**pg_dump:** minimum file size, `gzip -t`/`zstd -t` compression test, file freshness (mtime). | Low |
-| **L2 — Restorability** | **Borg:** restores a sample of files into scratch, asserts `path_exists`, newest-file freshness, file-count tolerance vs. the last good run.<br>**pg_dump:** copies the dump into scratch, but for a single dump L1+L3 do the real work. | Moderate (scales with sample size) |
-| **L3 — Usability** | **Borg:** extracts the dump at `extract_path` from the archive, then boots it the same way.<br>**pg_dump:** boots an ephemeral, network-isolated Postgres, loads the dump, runs the configured `sql` assertions (`select count(*) from users` → `> 0`, `age < 8d`, …). | High (full restore + DB boot) |
+| **L1 — Integrity** | **Borg & restic:** native `borg`/`restic check`, snapshot freshness, size-anomaly detection.<br>**pg_dump:** minimum file size, `gzip -t`/`zstd -t` compression test, file freshness (mtime). | Low |
+| **L2 — Restorability** | **Borg & restic:** restores a sample of files into scratch, asserts `path_exists`, newest-file freshness, file-count tolerance vs. the last good run.<br>**pg_dump:** copies the dump into scratch, but for a single dump L1+L3 do the real work. | Moderate (scales with sample size) |
+| **L3 — Usability** | **Borg & restic:** extracts the dump at `extract_path` from the archive, then boots it the same way.<br>**pg_dump:** boots an ephemeral, network-isolated Postgres, loads the dump, runs the configured `sql` assertions (`select count(*) from users` → `> 0`, `age < 8d`, …). | High (full restore + DB boot) |
 
 Layers always run sequentially, so if L3 is selected in the config, a failing L2 stops the job from executing.
 
@@ -62,7 +62,7 @@ docker compose up -d
 docker compose logs -f redrill
 ```
 
-> Prefer not to use Docker? Build the single static binary with `go build ./cmd/redrill` (Go 1.26). It needs the `borg` binary on the host for Borg sources and a container runtime for L3. Run `redrill doctor` to see exactly what's missing.
+> Prefer not to use Docker? Build the single static binary with `go build ./cmd/redrill` (Go 1.26). It needs the `borg` or `restic` binary on the host for those sources and a container runtime for L3. Run `redrill doctor` to see exactly what's missing.
 
 ### Config example
 
@@ -150,7 +150,7 @@ nextcloud-files   fail 1d ago   6d ago     Sun 04:10    STALE
 
 ## Configuration glossary
 
-- **Sources** — where backups live and how to read them. Today: `borg` and `dumpdir` (a directory of dump files).
+- **Sources** — where backups live and how to read them. Today: `borg`, `restic`, and `dumpdir` (a directory of dump files).
 - **Drills** — a scheduled audit of one source: `schedule`, `max_proof_age` (the proof SLA), optional `jitter`/`timeout`/`retention`, and one or more `levels`.
 - **Checks** — typed assertions producing evidence (expected vs. actual): `path_exists`, `file_count_tolerance_pct`, `newest_file_max_age`, `sql`, `sql_no_error`. The `sql` `expect` grammar covers `> N`, `>= N`, `== N`, `!= N`, `between A B`, `age < 8d` / `age > 8d`, `matches REGEX`, `nonempty`.
 - **Notifications** — via [shoutrrr](https://github.com/nicholas-fedor/shoutrrr): ntfy, Telegram, Discord, email, webhooks, and more. Messages lead with the diagnosis and the last-good date, not a stack trace.

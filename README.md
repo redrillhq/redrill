@@ -1,5 +1,8 @@
 # Redrill
 
+> [!WARNING]
+> **Early development — not ready for general use yet. Tested only by the maintainer so far; expect rough edges.**
+
 **Backups run every night. When was one last actually restored?**
 
 Redrill is a self-hosted daemon that proves backups are restorable by actually restoring them. On a schedule it pulls data out of the backups other tools already make (Borg and restic repos and Postgres dumps, for now), restores them into a throwaway sandbox, and for databases boots a real instance to check the loaded data. Each dataset gets a line like:

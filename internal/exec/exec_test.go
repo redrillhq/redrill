@@ -544,8 +544,8 @@ func TestRunResticL1Pass(t *testing.T) {
 	if len(res.Evidence) != 2 {
 		t.Errorf("evidence = %d, want 2 (native_check, snapshot_max_age)", len(res.Evidence))
 	}
-	if got := evidenceByKind(res, "native_check"); got.Expected != "restic check passes" {
-		t.Errorf("native_check expected = %q, want \"restic check passes\"", got.Expected)
+	if got := evidenceByKind(res, "native_check"); got.Expected != "restic check passed" {
+		t.Errorf("native_check expected = %q, want \"restic check passed\"", got.Expected)
 	}
 }
 

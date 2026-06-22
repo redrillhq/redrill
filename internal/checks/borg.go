@@ -27,7 +27,7 @@ func (c SnapshotMaxAge) Run(_ context.Context, env CheckEnv) (Evidence, error) {
 		ev.Status, ev.Actual = Error, "no snapshots to age-check"
 		return ev, nil
 	}
-	ev.Target = c.Newest.UTC().Format(time.RFC3339)
+	ev.Target = "newest snapshot"
 	age := env.Now.Sub(c.Newest)
 	ev.Actual = fmt.Sprintf("age %s", age.Round(time.Second))
 	ev.Status = Fail

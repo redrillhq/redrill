@@ -376,7 +376,7 @@ type nativeChecker interface {
 
 // nativeCheckEvidence: OK → pass, errors → fail, couldn't run → error.
 func nativeCheckEvidence(ctx context.Context, d nativeChecker, red *redact.Redactor) checks.Evidence {
-	ev := checks.Evidence{Kind: "native_check", Target: "repository", Expected: d.Name() + " check passes"}
+	ev := checks.Evidence{Kind: "native_check", Target: "repository", Expected: d.Name() + " check passed"}
 	rep, err := d.NativeCheck(ctx, driver.NativeCheckOpts{})
 	switch {
 	case err != nil:

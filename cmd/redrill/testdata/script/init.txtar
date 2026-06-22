@@ -1,0 +1,47 @@
+# init runs non-interactively here (no TTY), so it is flag-driven.
+
+# the happy path emits YAML to stdout (exit 0); guidance goes to stderr
+redrill init --target docker --type dumpdir --path /backups/pg
+stdout 'version: 1'
+stdout 'type: dumpdir'
+stdout 'sql_no_error'
+! stdout 'Next:'
+stdout '# schedule' # manual-only by default: a commented hint, no active schedule
+
+# an explicit --schedule emits an active schedule line
+redrill init --target docker --type dumpdir --path /backups/pg --schedule @daily
+stdout 'schedule: "@daily"'
+
+# the trust guarantee: the emitted config passes the real validator
+redrill init --target docker --type dumpdir --path /backups/pg --write
+exists config.yaml
+redrill validate -c config.yaml
+stdout 'is valid'
+
+# writing over an existing file is refused without --force
+! redrill init --target host --type dumpdir --path /backups/pg --write
+stderr 'already exists'
+
+# --force overwrites; the chrome (incl. the wrote line) is on stderr
+redrill init --target host --type dumpdir --path /backups/pg --write --force
+stderr 'wrote config.yaml'
+
+# non-interactive without --target names the missing flag (exit 2)
+! redrill init --type dumpdir --path /backups/pg
+stderr 'missing: --target'
+
+# a borg backup scaffolds L1 + L2 (file restore proof) — no DB sandbox, no Postgres
+redrill init --target host --type borg --repo /tmp/borg-x --passphrase-file /p
+stdout 'native_check'
+stdout 'l2:'
+stdout 'min_total_bytes'
+! stdout 'l3:'
+
+# L3 for borg stays an explicit opt-in that then requires --extract-path
+! redrill init --target host --type borg --repo /tmp/borg-x --passphrase-file /p --l3
+stderr 'extract-path'
+
+# --json emits a machine plan carrying the rendered config
+redrill init --target docker --type dumpdir --path /backups/pg --json
+stdout '"source_type": "dumpdir"'
+stdout '"config":'

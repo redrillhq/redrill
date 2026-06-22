@@ -105,6 +105,20 @@ func TestParseValidBase(t *testing.T) {
 	}
 }
 
+// A drill with no schedule is valid — it's manual-only.
+func TestParseManualSchedule(t *testing.T) {
+	t.Parallel()
+	c, err := Parse([]byte("version: 1\ndata_dir: /v\nscratch: {dir: /s}\n" +
+		"sources: [{name: s, type: borg, repo: r}]\n" +
+		"drills: [{name: d, source: s, levels: {l1: {native_check: true}}}]\n"))
+	if err != nil {
+		t.Fatalf("a manual-only drill (no schedule) should parse: %v", err)
+	}
+	if c.Drills[0].Schedule != "" {
+		t.Errorf("schedule = %q, want empty", c.Drills[0].Schedule)
+	}
+}
+
 func TestRetentionParses(t *testing.T) {
 	t.Parallel()
 	c, err := Parse([]byte("version: 1\ndata_dir: /v\nscratch: {dir: /s}\n" +
@@ -184,7 +198,6 @@ func TestParseErrors(t *testing.T) {
 		{"drill source missing", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, schedule: x, levels: {l1: {native_check: true}}}]\n", "drills[0].source"},
 		{"drill source unknown", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: nope, schedule: x, levels: {l1: {native_check: true}}}]\n", "no such source"},
 		{"drill no levels", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {}}]\n", "at least one level"},
-		{"drill schedule missing", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, levels: {l1: {native_check: true}}}]\n", "schedule"},
 		{"retention negative count", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, retention: {max_count: -1}, levels: {l1: {native_check: true}}}]\n", "retention.max_count"},
 		{"retention negative age", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, retention: {max_age: -5h}, levels: {l1: {native_check: true}}}]\n", "negative duration"},
 		{"retention unknown key", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, retention: {nope: 1}, levels: {l1: {native_check: true}}}]\n", "nope"},

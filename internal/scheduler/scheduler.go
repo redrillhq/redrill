@@ -95,6 +95,9 @@ func New(drills []config.Drill, run RunFunc, opts Options) (*Scheduler, error) {
 	}
 	now := s.clock.Now()
 	for i := range drills {
+		if drills[i].Schedule == "" {
+			continue // manual-only drill: never auto-fires (run via CLI/API/hook)
+		}
 		sched, err := ParseSchedule(drills[i].Schedule)
 		if err != nil {
 			return nil, fmt.Errorf("drill %s: %w", drills[i].Name, err)

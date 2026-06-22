@@ -80,6 +80,7 @@ Usage:
   redrill <command> [flags]
 
 Commands:
+  init       scaffold a starter config (interactive on a terminal)
   validate   strictly check a config file
   run        run a drill now: NAME, --all, or pick interactively
   status     show each drill's last run, proof age, next run, and SLA state
@@ -101,6 +102,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
+	case "init":
+		return runInit(args[1:], stdout, stderr)
 	case "validate":
 		return runValidate(args[1:], stdout, stderr)
 	case "run":
@@ -420,6 +423,9 @@ func parseNameAndFlags(fs *flag.FlagSet, args []string) (name string, ok bool, e
 func checkSchedules(cfg *config.Config) error {
 	var errs []error
 	for i := range cfg.Drills {
+		if cfg.Drills[i].Schedule == "" {
+			continue // manual-only drill
+		}
 		if _, err := scheduler.ParseSchedule(cfg.Drills[i].Schedule); err != nil {
 			errs = append(errs, fmt.Errorf("drills[%d].schedule: %w", i, err))
 		}

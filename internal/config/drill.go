@@ -75,9 +75,9 @@ type Sandbox struct {
 }
 
 func (d *Drill) validate(path, srcType string, es *errset) {
-	if d.Schedule == "" {
-		es.add(path+".schedule", "required")
-	}
+	// schedule is optional: an empty schedule means a manual-only drill (runs via
+	// `redrill run`, the API, or a hook; the Proof SLA still applies). Grammar of
+	// a non-empty schedule is checked at the cmd layer (config is a leaf).
 	if d.Levels.L1 == nil && d.Levels.L2 == nil && d.Levels.L3 == nil {
 		es.add(path+".levels", "at least one level (l1/l2/l3) required")
 	}

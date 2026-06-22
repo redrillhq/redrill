@@ -136,6 +136,21 @@ func TestNewBadSchedule(t *testing.T) {
 	}
 }
 
+// A drill with no schedule is manual-only: it produces no job and never fires.
+func TestNewManualSchedule(t *testing.T) {
+	t.Parallel()
+	s, err := New([]config.Drill{
+		{Name: "scheduled", Schedule: "Sun 04:10"},
+		{Name: "manual"}, // no schedule
+	}, nil, Options{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if len(s.jobs) != 1 || s.jobs[0].drill.Name != "scheduled" {
+		t.Fatalf("jobs = %d, want only the scheduled drill", len(s.jobs))
+	}
+}
+
 func TestRunDispatchesThenStops(t *testing.T) {
 	t.Parallel()
 	ran := make(chan string, 4)

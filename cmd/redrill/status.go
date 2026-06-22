@@ -27,8 +27,9 @@ type drillStatus struct {
 	headlineLevel string             // highest configured level
 	headlineProof time.Time
 	headlineOK    bool
-	nextRun       time.Time // zero if schedule unparseable
+	nextRun       time.Time // zero if no schedule
 	nextOK        bool
+	manual        bool // no schedule: runs only on demand
 	stale         bool
 }
 
@@ -100,7 +101,9 @@ func collectStatus(ctx context.Context, st *store.Store, cfg *config.Config, now
 				ds.headlineProof, ds.headlineOK = at, true
 			}
 		}
-		if sched, err := scheduler.ParseSchedule(d.Schedule); err == nil {
+		if d.Schedule == "" {
+			ds.manual = true
+		} else if sched, err := scheduler.ParseSchedule(d.Schedule); err == nil {
 			ds.nextRun, ds.nextOK = sched.Next(now), true
 		}
 		ds.stale = scheduler.Stale(d.MaxProofAge.Duration(), ds.headlineProof, now)
@@ -149,10 +152,14 @@ func provenCell(d drillStatus, now time.Time) string {
 }
 
 func nextRunCell(d drillStatus, now time.Time) string {
-	if !d.nextOK {
+	switch {
+	case d.manual:
+		return "manual"
+	case !d.nextOK:
 		return "-"
+	default:
+		return until(now, d.nextRun)
 	}
-	return until(now, d.nextRun)
 }
 
 // Optional times are RFC3339, omitted when absent.

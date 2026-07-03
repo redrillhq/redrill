@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/redrillhq/redrill/internal/driver"
@@ -73,6 +74,8 @@ func WithRunner(r Runner) Option {
 		}
 	}
 }
+
+var _ driver.SourceDriver = (*Driver)(nil)
 
 func New(repo string, opts ...Option) *Driver {
 	d := &Driver{repo: repo, binary: "borg", run: ExecRunner}
@@ -314,10 +317,18 @@ func ExecRunner(ctx context.Context, dir string, env []string, name string, args
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: argv is built here, not from user input
 	cmd.Dir = dir
 	cmd.Env = env
+	// SIGTERM first so the engine can release its repo lock; kill after WaitDelay.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 10 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
+	// A kill by ctx must surface as the runner's error, never as an engine exit
+	// code (a timed-out check would otherwise read as "backup corrupt").
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return stdout.Bytes(), stderr.Bytes(), -1, ctxErr
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return stdout.Bytes(), stderr.Bytes(), exitErr.ExitCode(), nil

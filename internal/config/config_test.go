@@ -4,6 +4,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -148,6 +149,26 @@ func TestAuthScopeValid(t *testing.T) {
 	}
 }
 
+func TestNotifyEventsDefault(t *testing.T) {
+	t.Parallel()
+	c, err := Parse([]byte("version: 1\ndata_dir: /v\nscratch: {dir: /s}\nnotify: {urls: [\"ntfy://host/topic\"]}\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"fail", "error", "recover", "stale"}
+	if !slices.Equal(c.Notify.Events, want) {
+		t.Errorf("events = %v, want %v", c.Notify.Events, want)
+	}
+	// No URLs → no default (nothing to send through anyway).
+	c, err = Parse([]byte("version: 1\ndata_dir: /v\nscratch: {dir: /s}\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(c.Notify.Events) != 0 {
+		t.Errorf("events = %v, want empty", c.Notify.Events)
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -216,6 +237,14 @@ func TestParseErrors(t *testing.T) {
 		{"l3 no checks", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: dumpdir, path: /p, pattern: \"*.gz\"}]\ndrills: [{name: d, source: s, schedule: x, levels: {l3: {sandbox: {image: p}}}}]\n", "at least one check"},
 		{"borg l3 missing extract_path", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l3: {sandbox: {image: p}, checks: [{sql_no_error: q}]}}}]\n", "extract_path"},
 		{"restic l3 missing extract_path", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: restic, repo: r, password_env: PW}]\ndrills: [{name: d, source: s, schedule: x, levels: {l3: {sandbox: {image: p}, checks: [{sql_no_error: q}]}}}]\n", "extract_path"},
+		{"exec check rejected at l2", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l2: {restore: {scope: full}, checks: [{exec: \"/bin/true\"}]}}}]\n", "not implemented yet"},
+		{"exec check rejected at l3", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: dumpdir, path: /p, pattern: \"*.gz\"}]\ndrills: [{name: d, source: s, schedule: x, levels: {l3: {sandbox: {image: p}, checks: [{exec: \"/bin/true\"}]}}}]\n", "not implemented yet"},
+		{"l1 empty", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l1: {}}}]\n", "at least one check that can fail"},
+		{"l1 native_check false only", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l1: {native_check: false}}}]\n", "at least one check that can fail"},
+		{"l1 advisory only", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l1: {size_anomaly_pct: 40}}}]\n", "at least one check that can fail"},
+		{"l2 sample scope without sample", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l2: {restore: {scope: sample}, checks: [{path_exists: a}]}}}]\n", "sample or include_paths"},
+		{"l2 default scope without sample", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: borg, repo: r}]\ndrills: [{name: d, source: s, schedule: x, levels: {l2: {checks: [{path_exists: a}]}}}]\n", "sample or include_paths"},
+		{"hash_match on dumpdir", "version: 1\ndata_dir: /v\nscratch: {dir: /s}\nsources: [{name: s, type: dumpdir, path: /p, pattern: \"*.gz\"}]\ndrills: [{name: d, source: s, schedule: x, levels: {l2: {restore: {scope: full}, checks: [{hash_match: true}]}}}]\n", "not valid for a dumpdir"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

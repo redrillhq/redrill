@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/redrillhq/redrill/internal/driver"
@@ -79,6 +80,8 @@ func WithRunner(r Runner) Option {
 	}
 }
 
+var _ driver.SourceDriver = (*Driver)(nil)
+
 func New(repo string, opts ...Option) *Driver {
 	d := &Driver{repo: repo, binary: "restic", run: ExecRunner}
 	for _, o := range opts {
@@ -94,8 +97,11 @@ func (d *Driver) Capabilities() driver.Capabilities {
 }
 
 // env returns the inherited environment plus secret refs; never appears on argv.
+// The repo rides RESTIC_REPOSITORY too: backend URLs can embed credentials
+// (rest:https://user:pass@host/), which argv would expose to `ps`.
 func (d *Driver) env() []string {
 	env := os.Environ()
+	env = append(env, "RESTIC_REPOSITORY="+d.repo)
 	if d.password != "" {
 		env = append(env, "RESTIC_PASSWORD="+d.password)
 	}
@@ -105,9 +111,9 @@ func (d *Driver) env() []string {
 	return env
 }
 
-// global prefixes the repo flag (and an optional rate limit) before a subcommand.
+// global prefixes an optional rate limit before a subcommand.
 func (d *Driver) global(args ...string) []string {
-	out := []string{"-r", d.repo}
+	var out []string
 	if d.downloadRateKi > 0 {
 		out = append(out, "--limit-download", strconv.FormatInt(d.downloadRateKi, 10))
 	}
@@ -138,15 +144,20 @@ func (d *Driver) ListSnapshots(ctx context.Context) ([]driver.Snapshot, error) {
 }
 
 // NativeCheck runs `restic check`. Validate runs first in the L1 flow and proves
-// reachability/auth, so a non-zero check here means the repo is bad (a failing
-// Report), not that the auditor is blind. A process that can't start is an error.
+// reachability/auth, so a positive non-zero exit here means the repo is bad (a
+// failing Report), not that the auditor is blind. A process that can't start or
+// died without an exit code (killed, OOM) is an error. No --no-lock: restic
+// check takes the repository's exclusive lock by engine design.
 func (d *Driver) NativeCheck(ctx context.Context, _ driver.NativeCheckOpts) (driver.Report, error) {
 	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, d.global("check"))
 	if err != nil {
 		return driver.Report{}, fmt.Errorf("restic check %s: %w", d.repo, err)
 	}
-	if exit == 0 {
+	switch {
+	case exit == 0:
 		return driver.Report{OK: true, Summary: "restic check passed"}, nil
+	case exit < 0:
+		return driver.Report{}, fmt.Errorf("restic check %s: died without exit code: %s", d.repo, oneLine(stderr))
 	}
 	summary := oneLine(stderr)
 	if summary == "" {
@@ -424,10 +435,18 @@ func ExecRunner(ctx context.Context, dir string, env []string, name string, args
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: argv is built here, not from user input
 	cmd.Dir = dir
 	cmd.Env = env
+	// SIGTERM first so the engine can release its repo lock; kill after WaitDelay.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 10 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
+	// A kill by ctx must surface as the runner's error, never as an engine exit
+	// code (a timed-out check would otherwise read as "backup corrupt").
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return stdout.Bytes(), stderr.Bytes(), -1, ctxErr
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return stdout.Bytes(), stderr.Bytes(), exitErr.ExitCode(), nil

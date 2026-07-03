@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Andrew Alyamovsky
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package fixtures builds deterministic backup fixtures for tests — dumpdirs and
-// borg repositories declared as data rather than assembled by shell. It is the
-// single source of truth for the gating fixtures.
+// Package fixtures builds deterministic backup fixtures for tests — dumpdirs,
+// borg, and restic repositories declared as data rather than assembled by
+// shell. It is the single source of truth for the gating fixtures.
 //
 // Test-only: it imports testing and is never linked into the binary (nothing
 // under cmd/ or production internal/ imports it).

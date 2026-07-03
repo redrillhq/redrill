@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // scanner is the common surface of *sql.Row and *sql.Rows.
@@ -27,7 +28,8 @@ const (
 	artifactByRun = `SELECT run_id, idx, name, path, bytes FROM artifacts WHERE run_id = ? ORDER BY idx`
 )
 
-// CreateRun inserts an unfinished run.
+// CreateRun inserts an unfinished run: identity fields only, the outcome
+// arrives with FinishRun.
 func (s *Store) CreateRun(ctx context.Context, r Run) (int64, error) {
 	switch {
 	case r.Drill == "":
@@ -38,10 +40,9 @@ func (s *Store) CreateRun(ctx context.Context, r Run) (int64, error) {
 		return 0, fmt.Errorf("create run for %s: started_at required", r.Drill)
 	}
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO runs ("trigger", drill, started_at, finished_at, result, level_reached, bytes_restored, duration_ms, executor)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(r.Trigger), r.Drill, unixNano(r.StartedAt), nullTime(r.FinishedAt), nullResult(r.Result),
-		r.LevelReached, r.BytesRestored, r.DurationMS, r.Executor)
+		INSERT INTO runs ("trigger", drill, started_at, executor)
+		VALUES (?, ?, ?, ?)`,
+		string(r.Trigger), r.Drill, unixNano(r.StartedAt), r.Executor)
 	if err != nil {
 		return 0, fmt.Errorf("create run for %s: %w", r.Drill, err)
 	}
@@ -52,15 +53,15 @@ func (s *Store) CreateRun(ctx context.Context, r Run) (int64, error) {
 	return id, nil
 }
 
-// FinishRun records a run's outcome by r.ID; returns wrapped ErrNotFound for an
-// unknown id.
+// FinishRun records a run's outcome by r.ID, exactly once — a recorded verdict
+// is immutable. Returns wrapped ErrNotFound for an unknown id.
 func (s *Store) FinishRun(ctx context.Context, r Run) error {
 	if r.ID == 0 {
 		return fmt.Errorf("finish run: id required")
 	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE runs SET finished_at = ?, result = ?, level_reached = ?, bytes_restored = ?, files_restored = ?, duration_ms = ?
-		WHERE id = ?`,
+		WHERE id = ? AND result IS NULL`,
 		nullTime(r.FinishedAt), nullResult(r.Result), r.LevelReached, r.BytesRestored, r.FilesRestored, r.DurationMS, r.ID)
 	if err != nil {
 		return fmt.Errorf("finish run %d: %w", r.ID, err)
@@ -70,6 +71,10 @@ func (s *Store) FinishRun(ctx context.Context, r Run) error {
 		return fmt.Errorf("finish run %d: %w", r.ID, err)
 	}
 	if n == 0 {
+		var one int
+		if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM runs WHERE id = ?`, r.ID).Scan(&one); err == nil {
+			return fmt.Errorf("finish run %d: already finished", r.ID)
+		}
 		return fmt.Errorf("finish run %d: %w", r.ID, ErrNotFound)
 	}
 	return nil
@@ -115,17 +120,34 @@ func (s *Store) ListRuns(ctx context.Context, drill string, limit int) ([]Run, e
 	return out, nil
 }
 
-// LastRunWithResult returns the most recent matching run, ok=false if none.
-func (s *Store) LastRunWithResult(ctx context.Context, drill string, result Result) (Run, bool, error) {
-	q := `SELECT ` + runColumns + ` FROM runs WHERE drill = ? AND result = ? ORDER BY id DESC LIMIT 1`
-	r, err := scanRun(s.db.QueryRowContext(ctx, q, drill, string(result)))
+// LastBaselineRun returns the most recent passing run that actually restored
+// files (the file_count_tolerance baseline), ok=false if none. Restore-less
+// passes (e.g. an L1-only run) must not reset the baseline to zero.
+func (s *Store) LastBaselineRun(ctx context.Context, drill string) (Run, bool, error) {
+	q := `SELECT ` + runColumns + ` FROM runs WHERE drill = ? AND result = 'pass' AND files_restored > 0 ORDER BY id DESC LIMIT 1`
+	r, err := scanRun(s.db.QueryRowContext(ctx, q, drill))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Run{}, false, nil
 	}
 	if err != nil {
-		return Run{}, false, fmt.Errorf("last %s run for %s: %w", result, drill, err)
+		return Run{}, false, fmt.Errorf("baseline run for %s: %w", drill, err)
 	}
 	return r, true, nil
+}
+
+// MarkAbandonedRuns finalizes runs a crashed process left without a verdict as
+// error, returning how many. Called at daemon startup, like the sandbox janitor.
+func (s *Store) MarkAbandonedRuns(ctx context.Context, now time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET finished_at = ?, result = 'error' WHERE result IS NULL`, unixNano(now))
+	if err != nil {
+		return 0, fmt.Errorf("mark abandoned runs: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("mark abandoned runs: %w", err)
+	}
+	return n, nil
 }
 
 // LatestFinishedRun returns a drill's most recent run with a recorded verdict
@@ -142,12 +164,34 @@ func (s *Store) LatestFinishedRun(ctx context.Context, drill string) (Run, bool,
 	return r, true, nil
 }
 
-// SumBytesRestored totals bytes_restored across a drill's runs; 0 if none.
-func (s *Store) SumBytesRestored(ctx context.Context, drill string) (int64, error) {
-	var n sql.NullInt64 // SUM over no rows is NULL
-	if err := s.db.QueryRowContext(ctx,
-		`SELECT SUM(bytes_restored) FROM runs WHERE drill = ?`, drill).Scan(&n); err != nil {
-		return 0, fmt.Errorf("sum bytes restored for %s: %w", drill, err)
+// AddBytesRestored accumulates a drill's monotonic restored-bytes counter. It
+// lives in drill_counters, which retention never prunes, so the Prometheus
+// counter can't regress when old runs are deleted.
+func (s *Store) AddBytesRestored(ctx context.Context, drill string, n int64) error {
+	if n <= 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO drill_counters (drill, bytes_restored_total)
+		VALUES (?, ?)
+		ON CONFLICT(drill) DO UPDATE SET bytes_restored_total = bytes_restored_total + excluded.bytes_restored_total`,
+		drill, n)
+	if err != nil {
+		return fmt.Errorf("add bytes restored for %s: %w", drill, err)
+	}
+	return nil
+}
+
+// BytesRestoredTotal returns a drill's monotonic restored-bytes counter; 0 if none.
+func (s *Store) BytesRestoredTotal(ctx context.Context, drill string) (int64, error) {
+	var n sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT bytes_restored_total FROM drill_counters WHERE drill = ?`, drill).Scan(&n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("bytes restored total for %s: %w", drill, err)
 	}
 	return n.Int64, nil
 }

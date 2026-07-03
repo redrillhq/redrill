@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { DrillView, TriggerOutcome } from '../api'
 import { api } from '../api'
@@ -24,7 +24,9 @@ import { RunStrip } from './RunStrip'
 const LEVELS = ['l1', 'l2', 'l3']
 
 export function DrillCard({ drill, now }: { drill: DrillView; now: number }) {
-  const runsState = useFetch((s) => api.runs(drill.drill, 20, s), [drill.drill])
+  // `now` changes with each board refresh, so the run strip refetches alongside
+  // the drill list instead of freezing at mount.
+  const runsState = useFetch((s) => api.runs(drill.drill, 20, s), [drill.drill, now])
   const runs = runsState.data ?? []
   const latest = runs[0]
   const state = proofState(drill, now)
@@ -32,15 +34,20 @@ export function DrillCard({ drill, now }: { drill: DrillView; now: number }) {
 
   const [triggering, setTriggering] = useState(false)
   const [toast, setToast] = useState<string>()
+  const reloadTimer = useRef<number>()
+  useEffect(() => () => window.clearTimeout(reloadTimer.current), [])
 
   async function runNow() {
     setTriggering(true)
     setToast(undefined)
-    const outcome = await api.trigger(drill.drill)
-    setTriggering(false)
-    setToast(triggerMessage(outcome))
-    if (outcome === 'started') {
-      window.setTimeout(() => runsState.reload(), 2000)
+    try {
+      const outcome = await api.trigger(drill.drill)
+      setToast(triggerMessage(outcome))
+      if (outcome === 'started') {
+        reloadTimer.current = window.setTimeout(() => runsState.reload(), 2000)
+      }
+    } finally {
+      setTriggering(false)
     }
   }
 
@@ -105,6 +112,8 @@ function triggerMessage(outcome: TriggerOutcome): string {
       return 'Run started'
     case 'busy':
       return 'A run is already in flight'
+    case 'ratelimited':
+      return 'Too many triggers — retry shortly'
     case 'disabled':
       return 'Triggering is disabled'
     case 'error':

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +156,7 @@ func ValidateSource(ctx context.Context, src config.Source) error {
 		}
 		red := redact.New()
 		red.AddSecret(passphrase)
+		addRepoSecret(red, src.Repo)
 		d := borg.New(src.Repo,
 			borg.WithBinary(src.Binary), borg.WithPassphrase(passphrase), borg.WithSSHKey(src.SSHKeyFile),
 		)
@@ -173,6 +175,7 @@ func ValidateSource(ctx context.Context, src config.Source) error {
 		}
 		red := redact.New()
 		red.AddSecret(password)
+		addRepoSecret(red, src.Repo)
 		for k, v := range backendEnv {
 			red.AddEnv(k, v)
 		}
@@ -218,7 +221,11 @@ func runDumpdirL1(ctx context.Context, step StepSpec) (StepResult, error) {
 			res.Evidence = append(res.Evidence, ev)
 		}
 	}
-	res.Files = len(selected)
+	// Files stays 0: L1 inspects, it restores nothing (Files feeds the
+	// file_count_tolerance baseline).
+	if len(res.Evidence) == 0 {
+		return errorStep(res, "no L1 checks produced evidence"), nil
+	}
 	res.Status = aggregate(res.Evidence)
 	res.Summary = red.Redact(summarize(res.Status, res.Evidence))
 	return res, nil
@@ -299,6 +306,7 @@ func (e *LocalExecutor) runBorgL1(ctx context.Context, step StepSpec) (StepResul
 	}
 	red := redact.New()
 	red.AddSecret(passphrase)
+	addRepoSecret(red, src.Repo)
 
 	d := e.newBorg(src, passphrase)
 	if err := d.Validate(ctx); err != nil {
@@ -307,8 +315,7 @@ func (e *LocalExecutor) runBorgL1(ctx context.Context, step StepSpec) (StepResul
 
 	l1 := step.L1
 	if l1 == nil {
-		res.Status, res.Summary = checks.Pass, "no L1 checks configured"
-		return res, nil
+		return errorStep(res, "no L1 config in step"), nil
 	}
 	if l1.NativeCheck != nil && *l1.NativeCheck {
 		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, red))
@@ -316,7 +323,9 @@ func (e *LocalExecutor) runBorgL1(ctx context.Context, step StepSpec) (StepResul
 	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
 		res.Evidence = append(res.Evidence, borgArchiveChecks(ctx, d, l1, step.Now, red)...)
 	}
-
+	if len(res.Evidence) == 0 {
+		return errorStep(res, "no L1 checks produced evidence"), nil
+	}
 	res.Status = aggregate(res.Evidence)
 	res.Summary = red.Redact(summarize(res.Status, res.Evidence))
 	return res, nil
@@ -335,6 +344,7 @@ func (e *LocalExecutor) resticDriver(src config.Source) (*restic.Driver, *redact
 	}
 	red := redact.New()
 	red.AddSecret(password)
+	addRepoSecret(red, src.Repo)
 	for k, v := range backendEnv {
 		red.AddEnv(k, v) // redact secret-named values (keys/tokens), not benign ones (region, endpoint)
 	}
@@ -353,16 +363,17 @@ func (e *LocalExecutor) runResticL1(ctx context.Context, step StepSpec) (StepRes
 
 	l1 := step.L1
 	if l1 == nil {
-		res.Status, res.Summary = checks.Pass, "no L1 checks configured"
-		return res, nil
+		return errorStep(res, "no L1 config in step"), nil
 	}
 	if l1.NativeCheck != nil && *l1.NativeCheck {
 		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, red))
 	}
 	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
-		res.Evidence = append(res.Evidence, resticArchiveChecks(ctx, d, l1, step.Now, red)...)
+		res.Evidence = append(res.Evidence, resticSnapshotChecks(ctx, d, l1, step.Now, red)...)
 	}
-
+	if len(res.Evidence) == 0 {
+		return errorStep(res, "no L1 checks produced evidence"), nil
+	}
 	res.Status = aggregate(res.Evidence)
 	res.Summary = red.Redact(summarize(res.Status, res.Evidence))
 	return res, nil
@@ -393,22 +404,35 @@ func nativeCheckEvidence(ctx context.Context, d nativeChecker, red *redact.Redac
 func borgArchiveChecks(ctx context.Context, d *borg.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) []checks.Evidence {
 	snaps, err := d.ListSnapshots(ctx)
 	if err != nil {
-		return []checks.Evidence{{Kind: "snapshot_max_age", Target: "repository", Status: checks.Error, Actual: red.Redact(err.Error())}}
+		return listErrorEvidence(l1, red.Redact(err.Error()))
 	}
-	return archiveAgeAndSize(ctx, snaps, l1, now, red, d.ArchiveSize)
+	return snapshotAgeAndSize(ctx, snaps, l1, now, red, d.ArchiveSize)
 }
 
-func resticArchiveChecks(ctx context.Context, d *restic.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) []checks.Evidence {
+func resticSnapshotChecks(ctx context.Context, d *restic.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) []checks.Evidence {
 	snaps, err := d.ListSnapshots(ctx)
 	if err != nil {
-		return []checks.Evidence{{Kind: "snapshot_max_age", Target: "repository", Status: checks.Error, Actual: red.Redact(err.Error())}}
+		return listErrorEvidence(l1, red.Redact(err.Error()))
 	}
-	return archiveAgeAndSize(ctx, snaps, l1, now, red, d.SnapshotSize)
+	return snapshotAgeAndSize(ctx, snaps, l1, now, red, d.SnapshotSize)
 }
 
-// archiveAgeAndSize builds the snapshot_max_age and size_anomaly evidence shared
+// listErrorEvidence attributes a snapshot-listing failure to every configured
+// check that needed the listing, not just snapshot_max_age.
+func listErrorEvidence(l1 *config.L1, msg string) []checks.Evidence {
+	var out []checks.Evidence
+	if l1.SnapshotMaxAge != nil {
+		out = append(out, checks.Evidence{Kind: "snapshot_max_age", Target: "repository", Status: checks.Error, Actual: msg})
+	}
+	if l1.SizeAnomalyPct != nil {
+		out = append(out, checks.Evidence{Kind: "size_anomaly", Target: "repository", Status: checks.Error, Actual: msg})
+	}
+	return out
+}
+
+// snapshotAgeAndSize builds the snapshot_max_age and size_anomaly evidence shared
 // by the repository engines (borg, restic); sizeFn fetches a snapshot's size.
-func archiveAgeAndSize(ctx context.Context, snaps []driver.Snapshot, l1 *config.L1, now time.Time, red *redact.Redactor, sizeFn func(context.Context, string) (int64, error)) []checks.Evidence {
+func snapshotAgeAndSize(ctx context.Context, snaps []driver.Snapshot, l1 *config.L1, now time.Time, red *redact.Redactor, sizeFn func(context.Context, string) (int64, error)) []checks.Evidence {
 	var out []checks.Evidence
 	if l1.SnapshotMaxAge != nil {
 		var newest time.Time
@@ -420,11 +444,16 @@ func archiveAgeAndSize(ctx context.Context, snaps []driver.Snapshot, l1 *config.
 		out = append(out, ev)
 	}
 	if l1.SizeAnomalyPct != nil {
-		if latest, trailing, ok := snapSizes(ctx, snaps, sizeFn); ok {
-			ev, _ := checks.SizeAnomaly{LatestSize: latest, TrailingSizes: trailing, Pct: *l1.SizeAnomalyPct}.Run(ctx, checks.CheckEnv{})
-			redactEvidence(red, &ev)
-			out = append(out, ev)
+		ev := checks.Evidence{
+			Kind: "size_anomaly", Target: "repository", Status: checks.Pass, Weak: true,
+			Expected: fmt.Sprintf("latest within %d%% of trailing avg", *l1.SizeAnomalyPct),
+			Actual:   "snapshot sizes unavailable — no signal",
 		}
+		if latest, trailing, ok := snapSizes(ctx, snaps, sizeFn); ok {
+			ev, _ = checks.SizeAnomaly{LatestSize: latest, TrailingSizes: trailing, Pct: *l1.SizeAnomalyPct}.Run(ctx, checks.CheckEnv{})
+		}
+		redactEvidence(red, &ev)
+		out = append(out, ev)
 	}
 	return out
 }
@@ -446,6 +475,24 @@ func snapSizes(ctx context.Context, snaps []driver.Snapshot, sizeFn func(context
 		}
 	}
 	return latest, trailing, true
+}
+
+// addRepoSecret registers a credential embedded in a repo URL (e.g.
+// rest:https://user:pass@host/) so driver errors can't leak it.
+func addRepoSecret(red *redact.Redactor, repo string) {
+	s := repo
+	if i := strings.Index(s, "://"); i >= 0 {
+		if j := strings.LastIndexByte(s[:i], ':'); j >= 0 {
+			s = s[j+1:] // strip an engine prefix like rest: before the scheme
+		}
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.User == nil {
+		return
+	}
+	if pw, ok := u.User.Password(); ok {
+		red.AddSecret(pw)
+	}
 }
 
 // resolveSecret reads from a *_file (trailing newline trimmed) or *_env; neither
@@ -500,8 +547,7 @@ func (e *LocalExecutor) runBorgL2(ctx context.Context, step StepSpec) (StepResul
 	res := StepResult{Level: step.Level}
 	l2 := step.L2
 	if l2 == nil {
-		res.Status, res.Summary = checks.Pass, "no L2 config"
-		return res, nil
+		return errorStep(res, "no L2 config in step"), nil
 	}
 	src := step.Source
 	passphrase, err := resolveSecret(src.PassphraseFile, src.PassphraseEnv)
@@ -510,6 +556,7 @@ func (e *LocalExecutor) runBorgL2(ctx context.Context, step StepSpec) (StepResul
 	}
 	red := redact.New()
 	red.AddSecret(passphrase)
+	addRepoSecret(red, src.Repo)
 
 	d := e.newBorg(src, passphrase)
 	if err := d.Validate(ctx); err != nil {
@@ -554,8 +601,7 @@ func (e *LocalExecutor) runResticL2(ctx context.Context, step StepSpec) (StepRes
 	res := StepResult{Level: step.Level}
 	l2 := step.L2
 	if l2 == nil {
-		res.Status, res.Summary = checks.Pass, "no L2 config"
-		return res, nil
+		return errorStep(res, "no L2 config in step"), nil
 	}
 	d, red, err := e.resticDriver(step.Source)
 	if err != nil {
@@ -603,8 +649,7 @@ func runDumpdirL2(ctx context.Context, step StepSpec) (StepResult, error) {
 	res := StepResult{Level: step.Level}
 	l2 := step.L2
 	if l2 == nil {
-		res.Status, res.Summary = checks.Pass, "no L2 config"
-		return res, nil
+		return errorStep(res, "no L2 config in step"), nil
 	}
 	red := redact.New()
 	d := dumpdir.New(step.Source.Path, step.Source.Pattern)
@@ -647,8 +692,16 @@ func finishL2(ctx context.Context, res StepResult, restoreDir string, cfgChecks 
 	count, total, newest := walkAggregates(restoreDir)
 	env := checks.CheckEnv{RestoreDir: restoreDir, Now: step.Now}
 	for _, cc := range cfgChecks {
+		if cc.Kind == "hash_match" && !cc.HashMatch {
+			continue // explicitly disabled
+		}
 		c := buildL2Check(cc, count, total, newest, step.PrevFileCount)
 		if c == nil {
+			// A configured check must never vanish silently (it would let the
+			// level pass while checking nothing).
+			res.Evidence = append(res.Evidence, checks.Evidence{
+				Kind: cc.Kind, Status: checks.Error, Actual: "check kind not supported at this level",
+			})
 			continue
 		}
 		ev, err := c.Run(ctx, env)
@@ -673,7 +726,9 @@ func buildL2Check(cc config.Check, count int, total int64, newest time.Time, pre
 	case "canary_file":
 		return checks.CanaryFile{Path: cc.Path}
 	case "hash_match":
-		return checks.HashMatch{} // borg exposes no per-file manifest
+		// No engine exposes a per-file manifest; borg/restic verify hashes on
+		// extract themselves (config rejects hash_match for dumpdir).
+		return checks.HashMatch{}
 	case "newest_file_max_age":
 		return checks.NewestFileMaxAge{Newest: newest, Max: cc.NewestFileMaxAge.Duration()}
 	case "min_total_bytes":

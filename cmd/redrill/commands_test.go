@@ -112,7 +112,9 @@ func TestPickDrill(t *testing.T) {
 		{name: "valid selection", input: "2\n", wantName: "b"},
 		{name: "first", input: "1\n", wantName: "a"},
 		{name: "blank cancels cleanly", input: "\n"},
-		{name: "eof cancels cleanly", input: ""},
+		// Closed input (a cron job that forgot the NAME) must not read as a
+		// deliberate cancel with exit 0.
+		{name: "eof is a usage error", input: "", wantCode: 2},
 		{name: "out of range", input: "9\n", wantCode: 2},
 		{name: "not a number", input: "xyz\n", wantCode: 2},
 	}
@@ -414,6 +416,18 @@ func TestHistory(t *testing.T) {
 		var out, errb bytes.Buffer
 		if code := run([]string{"history", "-c", cfg}, &out, &errb); code != 2 {
 			t.Fatalf("exit = %d, want 2", code)
+		}
+	})
+
+	t.Run("unknown drill exits 2", func(t *testing.T) {
+		t.Parallel()
+		cfg, _ := setupStatusConfig(t)
+		var out, errb bytes.Buffer
+		if code := run([]string{"history", "ghost", "-c", cfg}, &out, &errb); code != 2 {
+			t.Fatalf("exit = %d, want 2 (a typo'd NAME must not read as ok)", code)
+		}
+		if !strings.Contains(errb.String(), "no drill named") {
+			t.Errorf("want unknown-drill message, got %q", errb.String())
 		}
 	})
 }

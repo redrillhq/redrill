@@ -87,6 +87,11 @@ func TestUIDoesNotShadowAPIOrInfra(t *testing.T) {
 	if c := do(t, h, http.MethodGet, "/metrics").Code; c != http.StatusOK {
 		t.Errorf("/metrics with UI present = %d, want 200", c)
 	}
+	// An unknown API path is a JSON 404, never the SPA shell with 200.
+	if rec := do(t, h, http.MethodGet, "/api/v1/nope"); rec.Code != http.StatusNotFound ||
+		!strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+		t.Errorf("/api/v1/nope = %d %q, want 404 application/json", rec.Code, rec.Header().Get("Content-Type"))
+	}
 }
 
 func TestNoUIRouteWhenUnset(t *testing.T) {

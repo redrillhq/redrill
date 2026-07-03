@@ -2,7 +2,7 @@
 # secrets, then:  docker compose up -d
 #
 # L3 (database sandbox) drills need the host container runtime, hence the docker
-# socket mount — the documented trust tradeoff. Drop it if you only run L1/L2;
+# socket mount — the documented trust tradeoff. Drop it when only L1/L2 run;
 # L3 then degrades to "skipped", never a silent pass.
 services:
   redrill:

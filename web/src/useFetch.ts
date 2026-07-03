@@ -30,7 +30,12 @@ export function useFetch<T>(
       })
       .catch((err: unknown) => {
         if (ac.signal.aborted) return
-        setState({ error: err instanceof Error ? err.message : String(err), loading: false })
+        // Keep the last good data so a failed poll doesn't blank the screen.
+        setState((s) => ({
+          data: s.data,
+          error: err instanceof Error ? err.message : String(err),
+          loading: false,
+        }))
       })
     return () => ac.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps

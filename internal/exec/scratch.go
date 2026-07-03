@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -42,6 +43,30 @@ func (s *scratch) preflight(predicted int64) error {
 }
 
 func (s *scratch) cleanup() { _ = os.RemoveAll(s.root) }
+
+// CleanStaleScratch removes run-* dirs a crashed process left behind; returns
+// how many. Startup-only, like the sandbox janitor — it can't tell an orphan
+// from another process's live restore.
+func CleanStaleScratch(base string) (int, error) {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("clean scratch %s: %w", base, err)
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "run-") {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(base, e.Name())); err != nil {
+			return n, fmt.Errorf("clean scratch %s: %w", base, err)
+		}
+		n++
+	}
+	return n, nil
+}
 
 // FreeBytes returns the bytes available to an unprivileged writer at path.
 func FreeBytes(path string) (uint64, error) {

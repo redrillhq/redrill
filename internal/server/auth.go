@@ -154,6 +154,7 @@ func (a *basicAuth) check(user, pass string) bool {
 	return bcrypt.CompareHashAndPassword(hash, []byte(pass)) == nil
 }
 
-// dummyHash is a valid bcrypt hash of a random value, used to equalize timing for
-// unknown usernames. It never matches a real password.
+// dummyHash equalizes timing for unknown usernames. It's the well-known example
+// hash of "password" — fine here, because check discards the compare result for
+// unknown users; only the compare's duration matters.
 var dummyHash = []byte("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy")

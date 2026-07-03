@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -72,6 +73,7 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 	}
 	red := redact.New()
 	red.AddSecret(passphrase)
+	addRepoSecret(red, src.Repo)
 	d := e.newBorg(src, passphrase)
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
@@ -148,14 +150,29 @@ func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scr
 		return versionTrapResult(res, plainDumpMajor(loaded), imageMajor, dumpSrc, red), nil
 	}
 
-	sb, err := e.sandbox.Start(ctx, l3Spec(step, loaded))
+	for k, v := range l3.Sandbox.Env {
+		red.AddEnv(k, v) // operator-supplied sandbox env may carry secrets
+	}
+
+	// sandbox.timeout bounds the boot (create, ready poll, dump injection).
+	startCtx, cancelStart := ctx, func() {}
+	if d := l3.Sandbox.Timeout.Duration(); d > 0 {
+		startCtx, cancelStart = context.WithTimeout(ctx, d)
+	}
+	sb, err := e.sandbox.Start(startCtx, l3Spec(step, loaded))
+	cancelStart()
 	if err != nil {
 		if errors.Is(err, sandbox.ErrNoRuntime) {
 			return StepResult{}, ErrNoSandboxRuntime
 		}
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	defer func() { _ = sb.Close(ctx) }()
+	// Teardown must survive the run's own timeout being the reason we're here.
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		_ = sb.Close(closeCtx)
+	}()
 
 	if format == "custom" {
 		if dm := customDumpMajor(ctx, sb); versionTrap(dm, imageMajor) {
@@ -175,6 +192,11 @@ func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scr
 	for _, cc := range l3.Checks {
 		c := buildL3Check(cc, db)
 		if c == nil {
+			// A configured check must never vanish silently (it would let the
+			// level pass while checking nothing).
+			res.Evidence = append(res.Evidence, checks.Evidence{
+				Kind: cc.Kind, Status: checks.Error, Actual: "check kind not supported at this level",
+			})
 			continue
 		}
 		ev, err := c.Run(ctx, env)
@@ -241,8 +263,12 @@ func resolveLoader(load, format string) string {
 	}
 }
 
-// loadDump tolerates load errors — the sql asserts give the verdict; only an
-// inability to run the loader is error here.
+// loadDump tolerates per-statement load errors — the sql asserts give the
+// verdict — but a loader that couldn't complete at all must not read as pass:
+// psql exits non-zero only on its own fatal/connection failures (statement
+// errors exit 0 without ON_ERROR_STOP) → error; pg_restore exits 1 both for
+// tolerated ignored errors (kept pass, counted) and for a rejected archive
+// (fail, the backup is bad) — told apart by its "errors ignored" summary.
 func loadDump(ctx context.Context, sb sandbox.Sandbox, loader string) checks.Evidence {
 	ev := checks.Evidence{Kind: "load", Target: containerDumpPath, Expected: "dump loads"}
 	cmd := []string{"psql", "-U", "postgres", "-d", "postgres", "-f", containerDumpPath}
@@ -254,9 +280,38 @@ func loadDump(ctx context.Context, sb sandbox.Sandbox, loader string) checks.Evi
 		ev.Status, ev.Actual = checks.Error, "exec: "+err.Error()
 		return ev
 	}
-	ev.Status = checks.Pass
-	ev.Actual = fmt.Sprintf("loaded (exit %d, %d error lines)", res.ExitCode, countErrorLines(res.Stdout+res.Stderr))
+	out := res.Stdout + res.Stderr
+	switch {
+	case res.ExitCode == 0:
+		ev.Status = checks.Pass
+		ev.Actual = fmt.Sprintf("loaded (exit 0, %d error lines)", countErrorLines(out))
+	case res.ExitCode == 126 || res.ExitCode == 127:
+		ev.Status = checks.Error
+		ev.Actual = fmt.Sprintf("%s could not run (exit %d): %s", loader, res.ExitCode, firstLine(res.Stderr))
+	case loader == "pg_restore" && strings.Contains(out, "errors ignored on restore"):
+		ev.Status = checks.Pass
+		ev.Actual = fmt.Sprintf("loaded with ignored errors (exit %d, %d error lines)", res.ExitCode, countErrorLines(out))
+	case loader == "pg_restore":
+		ev.Status = checks.Fail
+		ev.Actual = fmt.Sprintf("pg_restore rejected the dump (exit %d): %s", res.ExitCode, firstLine(res.Stderr))
+	default:
+		ev.Status = checks.Error
+		ev.Actual = fmt.Sprintf("psql could not complete the load (exit %d): %s", res.ExitCode, firstLine(res.Stderr))
+	}
 	return ev
+}
+
+// firstLine returns the first non-empty line, truncated for evidence.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			if len(line) > 200 {
+				return line[:200] + "…"
+			}
+			return line
+		}
+	}
+	return "(no output)"
 }
 
 func listDatabases(ctx context.Context, sb sandbox.Sandbox) map[string]bool {

@@ -90,6 +90,10 @@ func (c *Config) applyDefaults() {
 	if c.Concurrency == 0 {
 		c.Concurrency = 1
 	}
+	// URLs with no events would be a silent no-op notifier.
+	if len(c.Notify.URLs) > 0 && len(c.Notify.Events) == 0 {
+		c.Notify.Events = []string{"fail", "error", "recover", "stale"}
+	}
 	for i := range c.Sources {
 		if c.Sources[i].Type == "dumpdir" && c.Sources[i].Pick == "" {
 			c.Sources[i].Pick = "newest"

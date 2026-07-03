@@ -71,6 +71,9 @@ describe('proofState', () => {
       'stale',
     )
   })
+  it('stale wins over never — an unproven drill past its SLA must alarm', () => {
+    expect(proofState({ ...base, stale: true }, now)).toBe('stale')
+  })
   it('proven when fresh within SLA', () => {
     expect(
       proofState(

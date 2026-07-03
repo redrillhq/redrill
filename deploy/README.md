@@ -17,7 +17,7 @@ docker compose exec redrill redrill doctor   # preflight: engines, runtime, scra
 
 From the repo root, `make docker-up` builds the image and starts this stack in one step (`make docker-down` to stop, `make docker-logs` to tail) — handy for a production-like local run. The web UI + API are then at `http://127.0.0.1:8090/`.
 
-- **Expose backups read-only.** Mount the repositories/dump directories you audit
+- **Expose backups read-only.** Mount the audited repositories/dump directories
   with `:ro`. redrill never writes to them by construction, and the read-only
   mount makes that belt-and-suspenders.
 - **Secrets are files.** Mount borg passphrases / read-only SSH keys and reference
@@ -72,7 +72,7 @@ POST /api/v1/drills/{name}/run         # "Run now" (rate-limited; 409 if busy)
   auth is on it gates `/api/*`; `server.auth_scope: all` also gates the UI and `/metrics`
   (`/healthz` always stays open for liveness probes).
 - **Dead-man ping.** Set `notify.healthchecks_url` to have redrill ping a monitor
-  (e.g. healthchecks.io) each scheduler cycle, so you're alerted if the daemon itself
+  (e.g. healthchecks.io) each scheduler cycle, raising an alert if the daemon itself
   goes down. Set the check's expected period to the drill cadence.
 
 ## Exposing redrill on a public URL
@@ -84,13 +84,13 @@ plain HTTP would send credentials in the clear. Drop the published port from
 
 **Pick one proxy.** [`compose/Caddyfile.example`](compose/Caddyfile.example) (Caddy,
 auto-HTTPS — recommended) and the nginx block below are two ways to do the *same*
-thing; deploy whichever you already run, not both. Each terminates TLS and restricts
+thing; deploy whichever is already in use, not both. Each terminates TLS and restricts
 `/metrics`.
 
 **Where credentials live — pick one place, not both:**
 
 - **In redrill.** Browser login via either `server.basic_auth_file` (a bcrypt htpasswd
-  file, `htpasswd -B -c ./htpasswd admin`, mounted at the path you set — the compose
+  file, `htpasswd -B -c ./htpasswd admin`, mounted at the configured path — the compose
   mount is commented out pointing at `/etc/redrill/htpasswd`) or `server.basic_auth_env`
   (an env var with `user:password` lines — easiest in compose). For scripts, Prometheus,
   and the MCP server, `server.api_keys_env` holds bearer tokens, sent as

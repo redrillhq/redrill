@@ -88,13 +88,19 @@ func (c *Check) UnmarshalYAML(n *yaml.Node) error {
 }
 
 func (c *Check) validate(path, level string, es *errset) {
+	// exec is in the DESIGN §7 catalog but unimplemented; accepting it would
+	// silently run zero assertions (a level could pass while checking nothing).
+	if c.Kind == checkExec {
+		es.add(path, "the exec check is not implemented yet")
+		return
+	}
 	switch level {
 	case "l2":
-		if !l2Checks[c.Kind] && c.Kind != checkExec {
+		if !l2Checks[c.Kind] {
 			es.add(path, "check %q is not valid at L2", c.Kind)
 		}
 	case "l3":
-		if !l3Checks[c.Kind] && c.Kind != checkExec {
+		if !l3Checks[c.Kind] {
 			es.add(path, "check %q is not valid at L3", c.Kind)
 		}
 	}
@@ -113,10 +119,6 @@ func (c *Check) validate(path, level string, es *errset) {
 	case checkSQLNoError:
 		if c.SQLNoError == "" {
 			es.add(path, "sql_no_error requires a query")
-		}
-	case checkExec:
-		if c.Exec == "" {
-			es.add(path, "exec requires a command")
 		}
 	}
 }

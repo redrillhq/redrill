@@ -83,7 +83,9 @@ func (s *Server) gatherMetrics(ctx context.Context) []metricFamily {
 			}
 		}
 
-		if total, err := s.store.SumBytesRestored(ctx, d.Name); err != nil {
+		// The monotonic counter row, not SUM over runs — retention prunes run rows
+		// and a Prometheus counter must never regress.
+		if total, err := s.store.BytesRestoredTotal(ctx, d.Name); err != nil {
 			s.log.Warn("metrics: bytes restored", "drill", d.Name, "error", err.Error())
 		} else {
 			bytesRestored = append(bytesRestored, labeledValue{labels: drillLabel, value: strconv.FormatInt(total, 10)})

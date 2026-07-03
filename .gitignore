@@ -1,7 +1,9 @@
 .idea/
 /bin/
+/redrill
 /tmp/
 /dev/config*.yaml
 coverage.out
 var/
 tmp/
+.DS_Store

@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/redrillhq/redrill/internal/config"
 	"github.com/redrillhq/redrill/internal/exec"
 	"github.com/redrillhq/redrill/internal/notify"
@@ -50,9 +52,11 @@ func runServe(args []string, _, stderr io.Writer) int {
 		return 3
 	}
 
-	// First signal cancels ctx; a second falls through to the default handler for a hard exit.
+	// First signal cancels ctx; unregistering right after restores the default
+	// disposition, so a second signal during a hung shutdown hard-exits.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() { <-ctx.Done(); stop() }()
 	return serve(ctx, cfg, newLogger(stderr))
 }
 
@@ -79,6 +83,18 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 	}
 
 	clock := func() time.Time { return time.Now().UTC() }
+	// Startup housekeeping, mirroring the sandbox janitor: finalize run rows a
+	// crash left without a verdict, and remove their leftover scratch dirs.
+	if n, err := st.MarkAbandonedRuns(startCtx, clock()); err != nil {
+		log.Warn("could not finalize abandoned runs", "error", err.Error())
+	} else if n > 0 {
+		log.Info("finalized abandoned runs as error", "count", n)
+	}
+	if n, err := exec.CleanStaleScratch(cfg.Scratch.Dir); err != nil {
+		log.Warn("scratch cleanup failed", "error", err.Error())
+	} else if n > 0 {
+		log.Info("removed stale scratch dirs", "count", n)
+	}
 	executor := buildExecutor(startCtx, cfg, log)
 	if executor.sandbox != nil {
 		defer func() { _ = executor.sandbox.Close() }()
@@ -103,23 +119,23 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 	runFunc := func(rctx context.Context, d config.Drill) error { return runOnce(rctx, d, store.TriggerSchedule) }
 
 	// One single-flight gate, shared between the scheduler and API-triggered runs
-	// so a manual "Run now" never overlaps a scheduled run (DESIGN §9.6).
-	gate := make(chan struct{}, cfg.Concurrency)
+	// so a manual "Run now" never overlaps a scheduled run (DESIGN §9.6) — and,
+	// with concurrency > 1, the same drill never runs twice at once.
+	gate := scheduler.NewGate(cfg.Concurrency)
 	var apiWG sync.WaitGroup
 	apiTrigger := func(name string) error {
 		d, _, ok := findDrill(cfg, name)
 		if !ok {
 			return fmt.Errorf("no such drill %q", name)
 		}
-		select {
-		case gate <- struct{}{}:
-		default:
+		release, ok := gate.TryAcquire(name)
+		if !ok {
 			return server.ErrBusy
 		}
 		apiWG.Add(1)
 		go func() {
 			defer apiWG.Done()
-			defer func() { <-gate }()
+			defer release()
 			rctx := ctx
 			if to := d.Timeout.Duration(); to > 0 {
 				var cancel context.CancelFunc
@@ -264,7 +280,8 @@ func newLogger(w io.Writer) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(w, nil))
 }
 
+// isTTY reports whether f is an interactive terminal. A real ioctl probe, not a
+// char-device check: /dev/null (cron's stdin) is a char device but no terminal.
 func isTTY(f *os.File) bool {
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }

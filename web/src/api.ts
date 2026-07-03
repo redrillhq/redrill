@@ -50,7 +50,7 @@ export interface EvidenceView {
   target?: string
   expected?: string
   actual?: string
-  status: Result
+  status: Exclude<Result, 'skipped'> // a check verdict is never skipped
   weak?: boolean
 }
 
@@ -93,7 +93,7 @@ async function errorMessage(resp: Response): Promise<string> {
   return resp.statusText || `HTTP ${resp.status}`
 }
 
-export type TriggerOutcome = 'started' | 'busy' | 'disabled' | 'error'
+export type TriggerOutcome = 'started' | 'busy' | 'ratelimited' | 'disabled' | 'error'
 
 export const api = {
   drills: (signal?: AbortSignal) => getJSON<DrillView[]>('/api/v1/drills', signal),
@@ -104,12 +104,19 @@ export const api = {
   run: (id: number, signal?: AbortSignal) => getJSON<RunDetail>(`/api/v1/runs/${id}`, signal),
 
   async trigger(drill: string): Promise<TriggerOutcome> {
-    const resp = await fetch(`/api/v1/drills/${encodeURIComponent(drill)}/run`, { method: 'POST' })
+    let resp: Response
+    try {
+      resp = await fetch(`/api/v1/drills/${encodeURIComponent(drill)}/run`, { method: 'POST' })
+    } catch {
+      return 'error' // network failure must not strand the button
+    }
     switch (resp.status) {
       case 202:
         return 'started'
       case 409:
         return 'busy'
+      case 429:
+        return 'ratelimited'
       case 503:
         return 'disabled'
       default:

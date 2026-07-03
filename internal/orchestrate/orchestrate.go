@@ -112,7 +112,10 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 
 	// file_count_tolerance baseline, read orchestrator-side since checks never touch the store.
 	prevFileCount := 0
-	if last, ok, err := o.store.LastRunWithResult(ctx, drill.Name, store.ResultPass); err == nil && ok {
+	if last, ok, err := o.store.LastBaselineRun(ctx, drill.Name); err != nil {
+		// A missing baseline degrades the check to its no-baseline pass; say so.
+		o.log.Warn("baseline lookup failed", "drill", drill.Name, "error", err.Error())
+	} else if ok {
 		prevFileCount = int(last.FilesRestored)
 	}
 
@@ -151,6 +154,23 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 		return RunResult{}, fmt.Errorf("finish run %d: %w", runID, err)
 	}
 	finished = true
+	// Best-effort housekeeping: the monotonic metrics counter (never changes a
+	// run's verdict).
+	if err := o.store.AddBytesRestored(context.WithoutCancel(ctx), drill.Name, bytesRestored); err != nil {
+		o.log.Warn("bytes counter update failed", "drill", drill.Name, "error", err.Error())
+	}
+	// Proofs advance only when the whole run passes (DESIGN §9.8) — a level that
+	// passed inside a failed or errored run advances nothing.
+	if result.Status == store.ResultPass {
+		for _, lv := range result.Levels {
+			if lv.Status != string(checks.Pass) {
+				continue
+			}
+			if err := o.store.RecordProof(context.WithoutCancel(ctx), drill.Name, lv.Level, start); err != nil {
+				return result, fmt.Errorf("record proof for %s/%s: %w", drill.Name, lv.Level, err)
+			}
+		}
+	}
 	o.pruneRetention(ctx, drill, end)
 	return result, nil
 }
@@ -183,7 +203,7 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 	res, err := o.exec.RunStep(ctx, o.buildStep(runID, drill, src, lv, start, scratch, prevFileCount))
 	switch {
 	case errors.Is(err, exec.ErrUnsupported):
-		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (level not implemented yet)"}
+		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (unsupported level/source combination)"}
 		return out, false, o.recordStep(ctx, runID, out, stepStart)
 	case errors.Is(err, exec.ErrNoSandboxRuntime):
 		// Degrades to skipped, never a silent pass.
@@ -209,11 +229,6 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 	}
 	*bytes += res.Bytes
 	*files += res.Files
-	if res.Status == checks.Pass {
-		if err := o.store.RecordProof(ctx, drill.Name, lv.name, start); err != nil {
-			return out, true, fmt.Errorf("record proof for %s/%s: %w", drill.Name, lv.name, err)
-		}
-	}
 	return out, true, nil
 }
 

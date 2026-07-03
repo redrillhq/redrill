@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/redrillhq/redrill/internal/driver"
 )
@@ -198,6 +199,46 @@ func TestNativeCheckExitMapping(t *testing.T) {
 		if rep.OK != tc.wantOK {
 			t.Errorf("exit %d: OK = %v, want %v", tc.exit, rep.OK, tc.wantOK)
 		}
+	}
+	// A process that died without an exit code (killed, OOM) is an error, never
+	// a "backup corrupt" fail.
+	f := newFake()
+	f.exit["check"] = -1
+	if _, err := New("/r", WithRunner(f.run)).NativeCheck(context.Background(), driver.NativeCheckOpts{}); err == nil {
+		t.Error("exit -1: want error, got a Report")
+	}
+}
+
+// The repo string travels via RESTIC_REPOSITORY, never argv — backend URLs can
+// embed credentials that ps would expose.
+func TestRepoNeverOnArgv(t *testing.T) {
+	t.Parallel()
+	const repo = "rest:https://user:hunter2@backup.example.com/repo"
+	f := newFake()
+	f.stdout["snapshots"] = read(t, "snapshots.json")
+	d := New(repo, WithRunner(f.run))
+	_, _ = d.ListSnapshots(context.Background())
+
+	if !strings.Contains(strings.Join(f.envs[0], "\n"), "RESTIC_REPOSITORY="+repo) {
+		t.Error("RESTIC_REPOSITORY not set in env")
+	}
+	for _, call := range f.calls {
+		for _, arg := range call {
+			if strings.Contains(arg, repo) || strings.Contains(arg, "hunter2") {
+				t.Errorf("repo leaked onto argv: %v", call)
+			}
+		}
+	}
+}
+
+// A ctx kill surfaces as the runner's error, never as an engine exit code.
+func TestExecRunnerCtxCancelIsError(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, _, exit, err := ExecRunner(ctx, "", nil, "sleep", []string{"5"})
+	if err == nil {
+		t.Fatalf("ExecRunner under expired ctx: err = nil (exit %d), want ctx error", exit)
 	}
 }
 

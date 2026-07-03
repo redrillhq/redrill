@@ -88,7 +88,7 @@ func (d *Drill) validate(path, srcType string, es *errset) {
 		d.Levels.L1.validate(path+".levels.l1", srcType, es)
 	}
 	if d.Levels.L2 != nil {
-		d.Levels.L2.validate(path+".levels.l2", es)
+		d.Levels.L2.validate(path+".levels.l2", srcType, es)
 	}
 	if d.Levels.L3 != nil {
 		d.Levels.L3.validate(path+".levels.l3", srcType, es)
@@ -121,13 +121,35 @@ func (l *L1) validate(path, srcType string, es *errset) {
 	if l.SizeAnomalyPct != nil && (*l.SizeAnomalyPct < 0 || *l.SizeAnomalyPct > 100) {
 		es.add(path+".size_anomaly_pct", "must be 0..100, got %d", *l.SizeAnomalyPct)
 	}
+	// Without a check that can fail, the level would pass with zero evidence.
+	if !l.hasVerdictCheck() {
+		es.add(path, "at least one check that can fail is required (an L1 with no checks proves nothing; size_anomaly_pct is advisory)")
+	}
 }
 
-func (l *L2) validate(path string, es *errset) {
+// hasVerdictCheck reports whether any configured L1 check can fail.
+func (l *L1) hasVerdictCheck() bool {
+	return (l.NativeCheck != nil && *l.NativeCheck) ||
+		l.SnapshotMaxAge != nil ||
+		l.FileMinBytes != nil ||
+		(l.CompressionTest != nil && *l.CompressionTest) ||
+		l.MaxAge != nil
+}
+
+func (l *L2) validate(path, srcType string, es *errset) {
 	if l.Restore.Scope != "" && l.Restore.Scope != "sample" && l.Restore.Scope != "full" {
 		es.add(path+".restore.scope", "must be sample or full, got %q", l.Restore.Scope)
 	}
+	// An empty sample would silently restore the whole snapshot with a zero
+	// preflight prediction, bypassing the quota's early refusal.
+	if l.Restore.Scope != "full" && l.Restore.Sample == nil && len(l.Restore.IncludePaths) == 0 {
+		es.add(path+".restore", "a sample-scope restore requires sample or include_paths (use scope: full to restore everything)")
+	}
 	for i := range l.Checks {
+		// A dumpdir restore is a plain copy: nothing verifies restored bytes.
+		if l.Checks[i].Kind == checkHashMatch && srcType == "dumpdir" {
+			es.add(checkPath(path, i), "hash_match is not valid for a dumpdir source (nothing verifies restored bytes)")
+		}
 		l.Checks[i].validate(checkPath(path, i), "l2", es)
 	}
 }

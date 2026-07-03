@@ -64,7 +64,9 @@ func ParseExpect(s string) (Expectation, error) {
 			return Expectation{}, fmt.Errorf("expect %q: matches requires a regex", raw)
 		}
 		pat := strings.TrimSpace(strings.TrimPrefix(raw, fields[0]))
-		re, err := regexp.Compile(pat)
+		// Anchored: an unanchored pattern would substring-match ("matches ok"
+		// passing "not ok") — a silent false pass.
+		re, err := regexp.Compile(`\A(?:` + pat + `)\z`)
 		if err != nil {
 			return Expectation{}, fmt.Errorf("expect %q: invalid regex: %w", raw, err)
 		}
@@ -182,12 +184,15 @@ func toNumber(s string) (float64, error) {
 	return n, nil
 }
 
-// Timestamp shapes SQL scalars commonly arrive in.
+// Timestamp shapes SQL scalars commonly arrive in. Z07 (no colon) covers
+// postgres's default timestamptz text output, e.g. "2026-07-03 12:00:00+00".
 var timeLayouts = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
 	"2006-01-02 15:04:05.999999999Z07:00",
 	"2006-01-02 15:04:05Z07:00",
+	"2006-01-02 15:04:05.999999999Z07",
+	"2006-01-02 15:04:05Z07",
 	"2006-01-02 15:04:05.999999999",
 	"2006-01-02 15:04:05",
 	"2006-01-02",

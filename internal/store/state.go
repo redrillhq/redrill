@@ -11,7 +11,8 @@ import (
 	"time"
 )
 
-// RecordProof advances last_proven_at for one (drill, level).
+// RecordProof advances last_proven_at for one (drill, level). MAX keeps a proof
+// from regressing when overlapping runs (daemon + CLI) finish out of order.
 func (s *Store) RecordProof(ctx context.Context, drill, level string, at time.Time) error {
 	if drill == "" || level == "" {
 		return fmt.Errorf("record proof: drill and level required")
@@ -22,7 +23,7 @@ func (s *Store) RecordProof(ctx context.Context, drill, level string, at time.Ti
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO drill_state (drill, level, last_proven_at)
 		VALUES (?, ?, ?)
-		ON CONFLICT(drill, level) DO UPDATE SET last_proven_at = excluded.last_proven_at`,
+		ON CONFLICT(drill, level) DO UPDATE SET last_proven_at = MAX(last_proven_at, excluded.last_proven_at)`,
 		drill, level, unixNano(at))
 	if err != nil {
 		return fmt.Errorf("record proof for %s/%s: %w", drill, level, err)

@@ -266,10 +266,10 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	host, _ := os.Hostname()
 	executor := exec.NewLocal(host).WithIOPolicy(ioPolicy(cfg))
 	// Wire the L3 sandbox if a container engine is reachable, else L3 skips.
-	// The janitor reaps orphans from crashed runs.
+	// No janitor here: the label filter can't tell an orphan from a running
+	// daemon's live sandbox, so only serve startup reaps (when nothing runs).
 	if rt, rerr := docker.NewRuntime(ctx); rerr == nil {
 		defer func() { _ = rt.Close() }()
-		_, _ = rt.Janitor(ctx)
 		executor.WithSandbox(rt)
 	}
 	o := orchestrate.New(st, executor, func() time.Time { return time.Now().UTC() })
@@ -286,9 +286,19 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		if !*jsonOut {
 			opts.Report = func(out orchestrate.LevelOutcome) { printLevel(stdout, out) }
 		}
-		res, rerr := o.Run(ctx, *drill, *src, opts)
+		// The per-drill timeout applies to manual runs too — a hook-driven
+		// `redrill run` must not hang forever on a stuck engine.
+		runCtx, cancel := ctx, context.CancelFunc(func() {})
+		if to := drill.Timeout.Duration(); to > 0 {
+			runCtx, cancel = context.WithTimeout(ctx, to)
+		}
+		res, rerr := o.Run(runCtx, *drill, *src, opts)
+		cancel()
 		if rerr != nil {
 			fmt.Fprintf(stderr, "redrill: %s: %v\n", n, rerr)
+			if *jsonOut {
+				results = append(results, map[string]any{"drill": n, "status": "error", "error": rerr.Error()})
+			}
 			worst = worseResult(worst, store.ResultError)
 			continue
 		}
@@ -354,9 +364,15 @@ func pickDrill(in io.Reader, out io.Writer, cfg *config.Config) (string, int) {
 		fmt.Fprintf(out, "  %d) %s\n", i+1, cfg.Drills[i].Name)
 	}
 	fmt.Fprint(out, "drill number (blank to cancel): ")
-	line, _ := bufio.NewReader(in).ReadString('\n')
+	line, err := bufio.NewReader(in).ReadString('\n')
 	line = strings.TrimSpace(line)
 	if line == "" {
+		// A deliberate blank line cancels (exit 0); closed input (EOF — e.g. a
+		// cron job that forgot the NAME) is a usage error, never a silent ok.
+		if err != nil {
+			fmt.Fprintln(out, "no selection (input closed); run requires a drill NAME off a terminal")
+			return "", 2
+		}
 		return "", 0
 	}
 	n, err := strconv.Atoi(line)

@@ -61,53 +61,27 @@ func TestRecordProofAdvances(t *testing.T) {
 	}
 }
 
-// recordOnPass models the orchestrator policy: drill_state advances only on a
-// pass.
-func recordOnPass(ctx context.Context, t *testing.T, s *Store, drill string, at time.Time, results map[string]Result) {
-	t.Helper()
-	for level, res := range results {
-		if res != ResultPass {
-			continue
-		}
-		if err := s.RecordProof(ctx, drill, level, at); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func TestDrillStateOnlyOnPass(t *testing.T) {
+// The pass-only proof policy lives in the orchestrator and is tested there
+// (TestProofOnlyOnFullPass); the store's own guarantee is that a proof never
+// regresses when runs finish out of order (daemon + CLI overlap).
+func TestRecordProofNeverRegresses(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := newStore(t)
 
-	// L1 passes, L2 fails → only L1 proven.
-	recordOnPass(ctx, t, s, "d", epoch, map[string]Result{"l1": ResultPass, "l2": ResultFail})
-	if _, ok, _ := s.GetProof(ctx, "d", "l1"); !ok {
-		t.Error("L1 should be proven after a pass")
+	later := epoch.Add(7 * 24 * time.Hour)
+	if err := s.RecordProof(ctx, "d", "l1", later); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok, _ := s.GetProof(ctx, "d", "l2"); ok {
-		t.Error("L2 must not be proven after a fail")
+	if err := s.RecordProof(ctx, "d", "l1", epoch); err != nil {
+		t.Fatal(err)
 	}
-
-	// A week later both pass → L1 advances, L2 now proven.
-	week := epoch.Add(7 * 24 * time.Hour)
-	recordOnPass(ctx, t, s, "d", week, map[string]Result{"l1": ResultPass, "l2": ResultPass})
-
-	l1, ok, _ := s.GetProof(ctx, "d", "l1")
-	if !ok || !l1.Equal(week) {
-		t.Errorf("L1 proof = (%v, %v), want %v", l1, ok, week)
+	got, ok, err := s.GetProof(ctx, "d", "l1")
+	if err != nil || !ok {
+		t.Fatalf("GetProof: %v ok=%v", err, ok)
 	}
-	l2, ok, _ := s.GetProof(ctx, "d", "l2")
-	if !ok || !l2.Equal(week) {
-		t.Errorf("L2 proof = (%v, %v), want %v", l2, ok, week)
-	}
-
-	// L2 errors (not a backup failure) → no advance.
-	twoWeeks := epoch.Add(14 * 24 * time.Hour)
-	recordOnPass(ctx, t, s, "d", twoWeeks, map[string]Result{"l2": ResultError})
-	l2, _, _ = s.GetProof(ctx, "d", "l2")
-	if !l2.Equal(week) {
-		t.Errorf("L2 proof advanced on error: %v, want held at %v", l2, week)
+	if !got.Equal(later) {
+		t.Errorf("proof = %v, want held at %v (an older run must not regress it)", got, later)
 	}
 }
 

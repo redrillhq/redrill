@@ -64,8 +64,10 @@ export function localTime(iso: string | undefined): string {
 export type ProofState = 'proven' | 'aging' | 'stale' | 'never'
 
 export function proofState(d: DrillView, now: number = Date.now()): ProofState {
-  if (!d.last_proven) return 'never'
+  // stale wins over never: a never-proven drill past its SLA must alarm, not
+  // render in the muted never style.
   if (d.stale) return 'stale'
+  if (!d.last_proven) return 'never'
   const sla = d.max_proof_age_seconds ?? 0
   if (sla > 0) {
     const ageSec = (now - Date.parse(d.last_proven)) / 1000

@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
+	"path"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -67,20 +67,26 @@ func (r *Runtime) Start(ctx context.Context, spec sandbox.SandboxSpec) (sandbox.
 		return nil, fmt.Errorf("create sandbox: %w", err)
 	}
 	sb := &dockerSandbox{cli: r.cli, id: created.ID}
+	// Cleanup must succeed even when ctx expiring is why we're bailing out.
+	cleanup := func() {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		_ = sb.Close(cctx)
+	}
 
 	if err := r.cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
-		_ = sb.Close(ctx)
+		cleanup()
 		return nil, fmt.Errorf("start sandbox: %w", err)
 	}
 	if len(spec.ReadyCmd) > 0 {
 		if err := sb.waitReady(ctx, spec.ReadyCmd); err != nil {
-			_ = sb.Close(ctx)
+			cleanup()
 			return nil, fmt.Errorf("sandbox not ready: %w", err)
 		}
 	}
 	for _, f := range spec.Files {
 		if err := sb.copyIn(ctx, f); err != nil {
-			_ = sb.Close(ctx)
+			cleanup()
 			return nil, fmt.Errorf("copy %s into sandbox: %w", f.HostPath, err)
 		}
 	}
@@ -143,29 +149,57 @@ func (s *dockerSandbox) Exec(ctx context.Context, cmd []string) (sandbox.ExecRes
 	}
 	defer att.Close()
 
+	// The stream copy only ends when the process exits or the conn closes, so a
+	// canceled ctx must close the conn or a hung in-container command blocks the
+	// drill past its timeout.
+	stop := context.AfterFunc(ctx, func() { att.Close() })
+	defer stop()
+
 	var stdout, stderr bytes.Buffer
 	if _, err := stdcopy.StdCopy(&stdout, &stderr, att.Reader); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return sandbox.ExecResult{}, fmt.Errorf("exec read: %w", ctxErr)
+		}
 		return sandbox.ExecResult{}, fmt.Errorf("exec read: %w", err)
 	}
-	insp, err := s.cli.ContainerExecInspect(ctx, ex.ID)
+	exit, err := s.execExitCode(ctx, ex.ID)
 	if err != nil {
-		return sandbox.ExecResult{}, fmt.Errorf("exec inspect: %w", err)
+		return sandbox.ExecResult{}, err
 	}
-	return sandbox.ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: insp.ExitCode}, nil
+	return sandbox.ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exit}, nil
+}
+
+// execExitCode polls until the exec has actually finished: right after stream
+// EOF the daemon can still report Running with a placeholder ExitCode 0, and a
+// racy zero must never feed a check verdict.
+func (s *dockerSandbox) execExitCode(ctx context.Context, execID string) (int, error) {
+	for {
+		insp, err := s.cli.ContainerExecInspect(ctx, execID)
+		if err != nil {
+			return 0, fmt.Errorf("exec inspect: %w", err)
+		}
+		if !insp.Running {
+			return insp.ExitCode, nil
+		}
+		select {
+		case <-ctx.Done():
+			return 0, fmt.Errorf("exec inspect: %w", ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 // Close force-removes the container; idempotent (already-gone is a no-op).
+// closed is set only on success so a failed removal (e.g. a canceled ctx) can
+// be retried instead of silently leaking the container.
 func (s *dockerSandbox) Close(ctx context.Context) error {
 	if s.closed {
 		return nil
 	}
-	s.closed = true
-	if err := s.cli.ContainerRemove(ctx, s.id, container.RemoveOptions{Force: true}); err != nil {
-		if cerrdefs.IsNotFound(err) {
-			return nil
-		}
+	if err := s.cli.ContainerRemove(ctx, s.id, container.RemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("remove sandbox: %w", err)
 	}
+	s.closed = true
 	return nil
 }
 
@@ -208,7 +242,8 @@ func (s *dockerSandbox) copyIn(ctx context.Context, f sandbox.FileInject) error 
 	}
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	if err := tw.WriteHeader(&tar.Header{Name: filepath.Base(f.ContainerPath), Mode: 0o600, Size: int64(len(data))}); err != nil {
+	// Container paths are always slash-separated, hence path, not filepath.
+	if err := tw.WriteHeader(&tar.Header{Name: path.Base(f.ContainerPath), Mode: 0o600, Size: int64(len(data))}); err != nil {
 		return err
 	}
 	if _, err := tw.Write(data); err != nil {
@@ -217,5 +252,5 @@ func (s *dockerSandbox) copyIn(ctx context.Context, f sandbox.FileInject) error 
 	if err := tw.Close(); err != nil {
 		return err
 	}
-	return s.cli.CopyToContainer(ctx, s.id, filepath.Dir(f.ContainerPath), &buf, container.CopyToContainerOptions{})
+	return s.cli.CopyToContainer(ctx, s.id, path.Dir(f.ContainerPath), &buf, container.CopyToContainerOptions{})
 }

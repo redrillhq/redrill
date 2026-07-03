@@ -1,5 +1,6 @@
 node_modules
 *.local
+*.tsbuildinfo
 .DS_Store
 
 # dist/ is intentionally NOT ignored — it's embedded via go:embed, so committing

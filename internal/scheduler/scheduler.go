@@ -30,13 +30,54 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 // gating around each call.
 type RunFunc func(ctx context.Context, drill config.Drill) error
 
-// job's base is the un-jittered scheduled instant; fire is base plus this
-// period's jitter, what the loop waits on.
+// job's fire is the next scheduled instant plus this period's jitter — what the
+// loop waits on.
 type job struct {
 	drill    config.Drill
 	schedule Schedule
-	base     time.Time
 	fire     time.Time
+}
+
+// Gate is the shared single-flight gate: a global token bucket (cap =
+// concurrency) plus a per-drill in-flight set, so concurrency > 1 still never
+// runs the same drill twice at once. The scheduler and out-of-band triggers
+// (the API's Run now) share one Gate.
+type Gate struct {
+	sem      chan struct{}
+	mu       sync.Mutex
+	inflight map[string]bool
+}
+
+func NewGate(concurrency int) *Gate {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	return &Gate{sem: make(chan struct{}, concurrency), inflight: map[string]bool{}}
+}
+
+// TryAcquire claims a slot for drill; ok=false when every slot is busy or the
+// drill is already in flight. The returned release is idempotent.
+func (g *Gate) TryAcquire(drill string) (release func(), ok bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.inflight[drill] {
+		return nil, false
+	}
+	select {
+	case g.sem <- struct{}{}:
+	default:
+		return nil, false
+	}
+	g.inflight[drill] = true
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			g.mu.Lock()
+			delete(g.inflight, drill)
+			g.mu.Unlock()
+			<-g.sem
+		})
+	}, true
 }
 
 // Options configure a Scheduler. The zero value is valid: Concurrency defaults
@@ -46,10 +87,10 @@ type Options struct {
 	Clock       Clock
 	Logger      *slog.Logger
 	Rng         func() float64 // jitter fraction in [0,1); injectable for tests
-	// Gate, when non-nil, is the single-flight token bucket (cap = concurrency).
-	// Supplying it lets out-of-band triggers (the API's Run now) share the same
-	// gate, so a manual run and a scheduled run never overlap.
-	Gate chan struct{}
+	// Gate, when non-nil, is the shared single-flight gate. Supplying it lets
+	// out-of-band triggers (the API's Run now) share the same gate, so a manual
+	// run and a scheduled run never overlap.
+	Gate *Gate
 	// OnCycle, when set, runs once per scheduler loop iteration after due jobs
 	// are dispatched — the seam for the healthchecks dead-man ping. It must not
 	// block (the cmd wiring fires the ping asynchronously).
@@ -61,7 +102,7 @@ type Scheduler struct {
 	run     RunFunc
 	log     *slog.Logger
 	rng     func() float64
-	sem     chan struct{} // single-flight token bucket, cap = concurrency
+	gate    *Gate
 	onCycle func()
 	jobs    []*job
 	wg      sync.WaitGroup // in-flight runs, for graceful shutdown
@@ -81,16 +122,16 @@ func New(drills []config.Drill, run RunFunc, opts Options) (*Scheduler, error) {
 	if opts.Rng == nil {
 		opts.Rng = rand.Float64
 	}
-	sem := opts.Gate
-	if sem == nil {
-		sem = make(chan struct{}, opts.Concurrency)
+	gate := opts.Gate
+	if gate == nil {
+		gate = NewGate(opts.Concurrency)
 	}
 	s := &Scheduler{
 		clock:   opts.Clock,
 		run:     run,
 		log:     opts.Logger,
 		rng:     opts.Rng,
-		sem:     sem,
+		gate:    gate,
 		onCycle: opts.OnCycle,
 	}
 	now := s.clock.Now()
@@ -166,8 +207,7 @@ func (s *Scheduler) due(now time.Time) ([]*job, time.Time) {
 }
 
 func (s *Scheduler) advance(j *job, now time.Time) {
-	j.base = j.schedule.Next(now)
-	j.fire = j.base.Add(s.jitter(j.drill.Jitter.Duration()))
+	j.fire = j.schedule.Next(now).Add(s.jitter(j.drill.Jitter.Duration()))
 }
 
 // jitter returns a delay in [0, max); max <= 0 yields none.
@@ -178,19 +218,18 @@ func (s *Scheduler) jitter(max time.Duration) time.Duration {
 	return time.Duration(s.rng() * float64(max))
 }
 
-// dispatch drops a drill when no single-flight slot is free — excess isn't
-// queued; the next scheduled run retries.
+// dispatch drops a drill when no single-flight slot is free (or the same drill
+// is already running) — excess isn't queued; the next scheduled run retries.
 func (s *Scheduler) dispatch(ctx context.Context, j *job) {
-	select {
-	case s.sem <- struct{}{}:
-	default:
+	release, ok := s.gate.TryAcquire(j.drill.Name)
+	if !ok {
 		s.log.Warn("drill skipped: another run is in flight (single-flight)", "drill", j.drill.Name)
 		return
 	}
 	s.wg.Add(1)
 	go func(d config.Drill) {
 		defer s.wg.Done()
-		defer func() { <-s.sem }()
+		defer release()
 
 		rctx := ctx
 		if to := d.Timeout.Duration(); to > 0 {

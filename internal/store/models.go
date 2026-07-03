@@ -5,23 +5,6 @@ package store
 
 import "time"
 
-// ConfigHash is opaque to the store.
-type Source struct {
-	Name       string
-	Type       string
-	ConfigHash string
-	CreatedAt  time.Time
-}
-
-// LevelsJSON is stored verbatim.
-type Drill struct {
-	Name        string
-	Source      string
-	ConfigHash  string
-	MaxProofAge time.Duration
-	LevelsJSON  string
-}
-
 type Trigger string
 
 const (

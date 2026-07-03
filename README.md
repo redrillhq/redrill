@@ -65,7 +65,7 @@ docker compose up -d
 docker compose logs -f redrill
 ```
 
-> Prefer not to use Docker? Build the single static binary with `go build ./cmd/redrill` (Go 1.26). It needs the `borg` or `restic` binary on the host for those sources and a container runtime for L3. Run `redrill doctor` to see exactly what's missing.
+> Prefer not to use Docker? Build the single static binary with `go build -o bin/redrill ./cmd/redrill` (Go 1.26). It needs the `borg` or `restic` binary on the host for those sources and a container runtime for L3. Run `redrill doctor` to see exactly what's missing.
 
 ### Config example
 
@@ -131,6 +131,7 @@ drills:
 ## Available CLI commands
 
 ```
+redrill init              # scaffold a starter config (interactive on a terminal)
 redrill validate          # strictly check the config (exit 3 on any problem)
 redrill doctor            # preflight: engines, container runtime, scratch space, repo reachability
 redrill run [NAME]        # run a drill now: a NAME, --all, or pick interactively  (--level l1|l2|l3)
@@ -140,12 +141,12 @@ redrill serve             # the daemon: scheduler + notifications
 redrill version
 ```
 
-Every command takes `--json` and resolves its config from `-c`, else `$REDRILL_CONFIG`, else `/etc/redrill/config.yaml`. Exit codes are stable: 0 ok, 1 a drill failed, 2 infra error, 3 bad config. Drop `redrill status` in a terminal for the whole picture:
+Every command except `serve` takes `--json`, and all resolve the config from `-c`, else `$REDRILL_CONFIG`, else `/etc/redrill/config.yaml`. Exit codes are stable: 0 ok, 1 a drill failed, 2 infra error, 3 bad config. Drop `redrill status` in a terminal for the whole picture:
 
 ```
-DRILL             LAST RUN      PROVEN     NEXT RUN     SLA
-app-db            pass 2h ago   2h ago     Sun 05:00    ok
-nextcloud-files   fail 1d ago   6d ago     Sun 04:10    STALE
+DRILL             LAST RUN      PROVEN        NEXT RUN   SLA
+app-db            pass 2h ago   l3 2h ago     in 5d      ok
+nextcloud-files   fail 1d ago   l2 6d ago     in 2d      STALE
 
 1 of 2 drills proven within SLA
 ```
@@ -154,12 +155,12 @@ nextcloud-files   fail 1d ago   6d ago     Sun 04:10    STALE
 ## Configuration glossary
 
 - **Sources** — where backups live and how to read them. Today: `borg`, `restic`, and `dumpdir` (a directory of dump files).
-- **Drills** — a scheduled audit of one source: `schedule`, `max_proof_age` (the proof SLA), optional `jitter`/`timeout`/`retention`, and one or more `levels`.
-- **Checks** — typed assertions producing evidence (expected vs. actual): `path_exists`, `file_count_tolerance_pct`, `newest_file_max_age`, `sql`, `sql_no_error`. The `sql` `expect` grammar covers `> N`, `>= N`, `== N`, `!= N`, `between A B`, `age < 8d` / `age > 8d`, `matches REGEX`, `nonempty`.
+- **Drills** — an audit of one source: an optional `schedule` (omit it for a manual-only drill run via CLI, API, or a post-backup hook), `max_proof_age` (the proof SLA), optional `jitter`/`timeout`/`retention`, and one or more `levels`.
+- **Checks** — typed assertions producing evidence (expected vs. actual), e.g. `path_exists`, `path_absent`, `hash_match`, `canary_file`, `min_total_bytes`, `file_count_tolerance_pct`, `newest_file_max_age`, `sql`, `sql_no_error`. The `sql` `expect` grammar covers `> N`, `>= N`, `== N`, `!= N`, `between A B`, `age < 8d` / `age > 8d`, `matches REGEX` (whole-value match), `nonempty`.
 - **Notifications** — via [shoutrrr](https://github.com/nicholas-fedor/shoutrrr): ntfy, Telegram, Discord, email, webhooks, and more. Messages lead with the diagnosis and the last-good date, not a stack trace.
 - **Retention** — prune each drill's run history by `max_age` and/or `max_count`. The proof timeline (`last_proven_at`) is kept forever.
 
-The full annotated schema lives in [`deploy/compose/config.example.yaml`](deploy/compose/config.example.yaml).
+The full annotated schema lives in [`docs/manual/configuration.md`](docs/manual/configuration.md); [`deploy/compose/config.example.yaml`](deploy/compose/config.example.yaml) is a minimal commented starting point.
 
 ## Safety measures
 

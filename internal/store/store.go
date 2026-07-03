@@ -6,11 +6,15 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the cgo-free "sqlite" driver
 )
+
+// ErrNotFound is returned (wrapped) when a requested row does not exist.
+var ErrNotFound = errors.New("not found")
 
 // Store is clock-free: every business timestamp is caller-supplied.
 type Store struct {

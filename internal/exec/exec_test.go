@@ -17,6 +17,7 @@ import (
 
 	"github.com/redrillhq/redrill/internal/checks"
 	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/redact"
 )
 
 var base = time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
@@ -74,12 +75,40 @@ func TestRunStepDumpdirL1Pass(t *testing.T) {
 	if res.Status != checks.Pass {
 		t.Fatalf("status = %s, want pass (%s)", res.Status, res.Summary)
 	}
-	if len(res.Evidence) != 3 || res.Files != 1 {
-		t.Errorf("got %d evidence / %d files, want 3 / 1", len(res.Evidence), res.Files)
+	// Files stays 0: L1 restores nothing, so it must not feed the
+	// file_count_tolerance baseline.
+	if len(res.Evidence) != 3 || res.Files != 0 {
+		t.Errorf("got %d evidence / %d files, want 3 / 0", len(res.Evidence), res.Files)
 	}
 	for _, ev := range res.Evidence {
 		if ev.Status != checks.Pass {
 			t.Errorf("evidence %s = %s, want pass", ev.Kind, ev.Status)
+		}
+	}
+}
+
+func TestAddRepoSecret(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		repo   string
+		secret string // "" = nothing registered
+	}{
+		{"rest:https://user:hunter2@backup.example.com/repo", "hunter2"},
+		{"https://user:hunter2@host/repo", "hunter2"},
+		{"ssh://borg@host/./repo", ""},
+		{"s3:s3.amazonaws.com/bucket/repo", ""},
+		{"/var/backups/repo", ""},
+	}
+	for _, tt := range cases {
+		red := redact.New()
+		addRepoSecret(red, tt.repo)
+		got := red.Redact("credential is hunter2 here")
+		leaked := strings.Contains(got, "hunter2")
+		if tt.secret != "" && leaked {
+			t.Errorf("addRepoSecret(%q): credential not registered", tt.repo)
+		}
+		if tt.secret == "" && !leaked {
+			t.Errorf("addRepoSecret(%q): registered something unexpectedly", tt.repo)
 		}
 	}
 }

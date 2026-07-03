@@ -23,7 +23,7 @@ func testScheduler(run RunFunc, concurrency int) *Scheduler {
 		run:   run,
 		log:   discardLogger(),
 		rng:   func() float64 { return 0 },
-		sem:   make(chan struct{}, concurrency),
+		gate:  NewGate(concurrency),
 	}
 }
 
@@ -53,8 +53,8 @@ func TestDue(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Scheduler{rng: func() float64 { return 0 }}
-	jDue := &job{drill: config.Drill{Name: "due"}, schedule: daily, base: now.Add(-time.Hour), fire: now.Add(-time.Hour)}
-	jFuture := &job{drill: config.Drill{Name: "future"}, schedule: daily, base: now.Add(time.Hour), fire: now.Add(time.Hour)}
+	jDue := &job{drill: config.Drill{Name: "due"}, schedule: daily, fire: now.Add(-time.Hour)}
+	jFuture := &job{drill: config.Drill{Name: "future"}, schedule: daily, fire: now.Add(time.Hour)}
 	s.jobs = []*job{jDue, jFuture}
 
 	due, next := s.due(now)
@@ -160,8 +160,7 @@ func TestRunDispatchesThenStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Force the job due so the first loop tick fires it.
-	s.jobs[0].base = s.clock.Now().Add(-time.Minute)
-	s.jobs[0].fire = s.jobs[0].base
+	s.jobs[0].fire = s.clock.Now().Add(-time.Minute)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
@@ -188,16 +187,20 @@ func TestRunDispatchesThenStops(t *testing.T) {
 
 func TestSharedGate(t *testing.T) {
 	t.Parallel()
-	gate := make(chan struct{}, 1)
+	gate := NewGate(1)
 	s, err := New([]config.Drill{{Name: "d", Schedule: "Sun 04:10"}}, nil, Options{Gate: gate, Logger: discardLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.sem != gate {
+	if s.gate != gate {
 		t.Fatal("scheduler did not adopt the supplied Gate as its single-flight bucket")
 	}
 	// An out-of-band holder of the shared gate blocks the scheduler from dispatching.
-	gate <- struct{}{}
+	release, ok := gate.TryAcquire("other")
+	if !ok {
+		t.Fatal("TryAcquire on a fresh gate failed")
+	}
+	defer release()
 	var ran atomic.Int32
 	s.run = func(_ context.Context, _ config.Drill) error { ran.Add(1); return nil }
 	s.dispatch(context.Background(), &job{drill: config.Drill{Name: "d"}})
@@ -205,6 +208,32 @@ func TestSharedGate(t *testing.T) {
 	if ran.Load() != 0 {
 		t.Fatal("dispatch ran while the shared gate was held; single-flight not honored across the seam")
 	}
+}
+
+// With spare global slots, the same drill still never runs twice at once, and
+// release is idempotent.
+func TestGatePerDrill(t *testing.T) {
+	t.Parallel()
+	g := NewGate(2)
+	rel1, ok := g.TryAcquire("d")
+	if !ok {
+		t.Fatal("first acquire failed")
+	}
+	if _, ok := g.TryAcquire("d"); ok {
+		t.Fatal("same drill acquired twice concurrently")
+	}
+	rel2, ok := g.TryAcquire("other")
+	if !ok {
+		t.Fatal("second slot should admit a different drill")
+	}
+	rel1()
+	rel1() // idempotent
+	rel3, ok := g.TryAcquire("d")
+	if !ok {
+		t.Fatal("drill not re-acquirable after release")
+	}
+	rel2()
+	rel3()
 }
 
 func TestOnCycleFires(t *testing.T) {

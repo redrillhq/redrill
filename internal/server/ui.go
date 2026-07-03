@@ -14,6 +14,12 @@ import (
 // basic auth gates.
 func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/")
+	// An unknown API path must be a JSON 404, not a 200 with index.html — a
+	// typo'd client would otherwise see success-with-HTML.
+	if name == "api" || strings.HasPrefix(name, "api/") {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
 	if name != "" {
 		if f, err := s.ui.Open(name); err == nil {
 			info, serr := f.Stat()

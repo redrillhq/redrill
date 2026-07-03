@@ -222,15 +222,10 @@ func toolCheck(bin string) doctorCheck {
 
 func repoCheck(ctx context.Context, src config.Source) doctorCheck {
 	name := "repo: " + src.Name
-	err := exec.ValidateSource(ctx, src)
-	switch {
-	case err == nil:
-		return doctorCheck{Name: name, Status: statusOK, Detail: "reachable (" + src.Type + ")"}
-	case errors.Is(err, exec.ErrUnsupported):
-		return doctorCheck{Name: name, Status: statusWarn, Detail: firstLine(err.Error())}
-	default:
+	if err := exec.ValidateSource(ctx, src); err != nil {
 		return doctorCheck{Name: name, Status: statusErr, Detail: firstLine(err.Error())}
 	}
+	return doctorCheck{Name: name, Status: statusOK, Detail: "reachable (" + src.Type + ")"}
 }
 
 func anyL3(cfg *config.Config) bool {

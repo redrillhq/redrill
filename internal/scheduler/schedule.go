@@ -73,11 +73,11 @@ func shorthandToCron(spec string) (string, error) {
 	return fmt.Sprintf("%d %d * * %s", minute, hour, dow), nil
 }
 
-// withUTC leaves descriptors (@weekly) and user-supplied TZ prefixes alone.
+// withUTC leaves user-supplied TZ prefixes alone. Descriptors (@weekly) get the
+// prefix too — robfig defaults them to server-local time otherwise ("@every"
+// ignores the location, so the prefix is harmless there).
 func withUTC(cronSpec string) string {
-	if strings.HasPrefix(cronSpec, "@") ||
-		strings.HasPrefix(cronSpec, "CRON_TZ=") ||
-		strings.HasPrefix(cronSpec, "TZ=") {
+	if strings.HasPrefix(cronSpec, "CRON_TZ=") || strings.HasPrefix(cronSpec, "TZ=") {
 		return cronSpec
 	}
 	return "CRON_TZ=UTC " + cronSpec

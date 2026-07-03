@@ -2,13 +2,13 @@
 # Let's Encrypt) so redrill itself never needs a public port — put it on an
 # internal compose network and let Caddy be the only edge.
 #
-# Replace redrill.example.com with your domain. `redrill:8090` assumes both run in
+# Replace redrill.example.com with the real domain. `redrill:8090` assumes both run in
 # the same compose project (drop the published port from compose.yaml so the
 # daemon isn't reachable except through Caddy).
 
 redrill.example.com {
 	# Keep /metrics off the public internet — it discloses drill names, proof
-	# ages, and SLA state. Allow only your monitoring network; 403 for everyone
+	# ages, and SLA state. Allow only the monitoring network; 403 for everyone
 	# else. (Or gate it in redrill with `server.auth_scope: all`.)
 	@public_metrics {
 		path /metrics

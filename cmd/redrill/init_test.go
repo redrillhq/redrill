@@ -125,6 +125,28 @@ func TestFromFlags(t *testing.T) {
 	}
 }
 
+// Bad free-text inputs are ordinary usage errors, not the internal-error path.
+func TestValidateUserInputs(t *testing.T) {
+	cases := []struct {
+		name string
+		o    genOptions
+		want int
+	}{
+		{"ok", genOptions{Schedule: "Sun 04:00", MaxProofAge: "10d"}, 0},
+		{"manual schedule ok", genOptions{MaxProofAge: "10d"}, 0},
+		{"bad schedule", genOptions{Schedule: "bogus", MaxProofAge: "10d"}, 2},
+		{"bad max-proof-age", genOptions{Schedule: "Sun 04:00", MaxProofAge: "10 fortnights"}, 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			o := c.o
+			if got := validateUserInputs(io.Discard, &o); got != c.want {
+				t.Fatalf("validateUserInputs = %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
 func TestWizard(t *testing.T) {
 	// dumpdir happy path: docker target (so the path check is skipped), answer
 	// the required path, accept every default. Name is asked last and derived.

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/redrillhq/redrill/internal/checks"
 	"github.com/redrillhq/redrill/internal/config"
@@ -222,6 +223,86 @@ func TestResolveLoader(t *testing.T) {
 		if got := resolveLoader(c.load, c.format); got != c.want {
 			t.Errorf("resolveLoader(%q, %q) = %q, want %q", c.load, c.format, got, c.want)
 		}
+	}
+}
+
+// A loader that couldn't complete must not read as pass; tolerated pg_restore
+// ignored-errors stay pass; a rejected archive is fail (the backup is bad).
+func TestLoadDumpExitMapping(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		loader string
+		exit   int
+		stderr string
+		want   checks.Status
+	}{
+		{"psql clean", "psql", 0, "", checks.Pass},
+		{"psql statement errors tolerated", "psql", 0, "ERROR: relation exists", checks.Pass},
+		{"psql fatal", "psql", 1, "psql: fatal: out of memory", checks.Error},
+		{"psql connection lost", "psql", 2, "connection to server was lost", checks.Error},
+		{"loader missing", "psql", 127, "psql: not found", checks.Error},
+		{"pg_restore clean", "pg_restore", 0, "", checks.Pass},
+		{"pg_restore ignored errors", "pg_restore", 1, "pg_restore: warning: errors ignored on restore: 3", checks.Pass},
+		{"pg_restore rejects archive", "pg_restore", 1, "pg_restore: error: unexpected end of file", checks.Fail},
+		{"pg_restore missing", "pg_restore", 127, "pg_restore: not found", checks.Error},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			sb := &fakeSandbox{exec: func([]string) sandbox.ExecResult {
+				return sandbox.ExecResult{Stderr: tt.stderr, ExitCode: tt.exit}
+			}}
+			ev := loadDump(context.Background(), sb, tt.loader)
+			if ev.Status != tt.want {
+				t.Errorf("loadDump(%s exit %d) = %s, want %s (actual %q)", tt.loader, tt.exit, ev.Status, tt.want, ev.Actual)
+			}
+		})
+	}
+}
+
+// A configured check kind the builder can't construct becomes error evidence,
+// never a silent skip.
+func TestRunL3UnbuildableCheckIsError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	makeGz(t, dir, "app.sql.gz", "-- a dump\nSELECT 1;\n", base)
+	rt := &fakeRuntime{sb: &fakeSandbox{exec: pgRoute("42", 0)}}
+	// sql with a nil SQL payload is unbuildable (config validation would reject
+	// it; the executor must still never drop it silently).
+	step := dumpdirL3Step(dir, t.TempDir(), "postgres:16", []config.Check{{Kind: "sql"}})
+
+	res, err := NewLocal("h").WithSandbox(rt).RunStep(context.Background(), step)
+	if err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if res.Status != checks.Error {
+		t.Fatalf("status = %s, want error (unbuildable check); summary = %q", res.Status, res.Summary)
+	}
+}
+
+type blockingRuntime struct{}
+
+func (blockingRuntime) Start(ctx context.Context, _ sandbox.SandboxSpec) (sandbox.Sandbox, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// sandbox.timeout bounds the boot: a sandbox that never becomes ready is an
+// error, not a hang.
+func TestRunL3SandboxTimeout(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	makeGz(t, dir, "app.sql.gz", "-- a dump\nSELECT 1;\n", base)
+	step := dumpdirL3Step(dir, t.TempDir(), "postgres:16", []config.Check{sqlCheck("select 1", "> 0")})
+	step.L3.Sandbox.Timeout = config.Duration(50 * time.Millisecond)
+
+	res, err := NewLocal("h").WithSandbox(blockingRuntime{}).RunStep(context.Background(), step)
+	if err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if res.Status != checks.Error {
+		t.Fatalf("status = %s, want error (sandbox boot timeout); summary = %q", res.Status, res.Summary)
 	}
 }
 

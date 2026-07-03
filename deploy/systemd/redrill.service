@@ -1,5 +1,5 @@
 [Unit]
-Description=redrill — scheduled restore drills for your backups
+Description=redrill — scheduled restore drills for backups
 Documentation=https://github.com/redrillhq/redrill
 After=network-online.target docker.service
 Wants=network-online.target

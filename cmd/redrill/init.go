@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/redrillhq/redrill/internal/config"
+	"github.com/redrillhq/redrill/internal/scheduler"
 )
 
 const (
@@ -54,7 +55,7 @@ type genOptions struct {
 func runInit(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	target := fs.String("target", "", "deployment target: docker|host (required when non-interactive)")
+	target := fs.String("target", "", "deployment target: docker|host|local (required when non-interactive)")
 	typ := fs.String("type", "dumpdir", "source type: dumpdir|borg|restic")
 	name := fs.String("name", "", "drill name (source name is derived from it)")
 	schedule := fs.String("schedule", "", "drill schedule (cron or 'Sun 04:00'); empty = manual-only")
@@ -123,8 +124,17 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 			var ov bool
 			dest, ov = a.askWriteDest()
 			overwrite = overwrite || ov
+			if a.aborted {
+				fmt.Fprintln(stderr, "redrill: init aborted (incomplete input)")
+				return 2
+			}
 		}
 	} else if code := fromFlags(stderr, &o); code != 0 {
+		return code
+	}
+	// Pre-check the free-text inputs so a typo reads as a usage error, not as
+	// generateConfig's internal-error path.
+	if code := validateUserInputs(stderr, &o); code != 0 {
 		return code
 	}
 	resolveDefaults(&o)
@@ -210,6 +220,23 @@ func fromFlags(stderr io.Writer, o *genOptions) int {
 	if len(missing) > 0 {
 		fmt.Fprintf(stderr, "redrill: init is non-interactive (no TTY or --json); missing: %s\n", strings.Join(missing, ", "))
 		return 2
+	}
+	return 0
+}
+
+// validateUserInputs pre-checks the schedule and Proof SLA answers.
+func validateUserInputs(stderr io.Writer, o *genOptions) int {
+	if o.Schedule != "" {
+		if _, err := scheduler.ParseSchedule(o.Schedule); err != nil {
+			fmt.Fprintf(stderr, "redrill: invalid schedule: %v\n", err)
+			return 2
+		}
+	}
+	if o.MaxProofAge != "" {
+		if _, err := config.ParseDuration(o.MaxProofAge); err != nil {
+			fmt.Fprintf(stderr, "redrill: invalid max-proof-age: %v\n", err)
+			return 2
+		}
 	}
 	return 0
 }
@@ -340,7 +367,7 @@ func writeSecretFile(engine, value string) error {
 // a Docker target the path is a container path, so only its shape is checked.
 func checkLocalDir(target, p string, expectBorgRepo bool) string {
 	if !strings.HasPrefix(p, "/") {
-		return "not an absolute path — redrill runs as a daemon whose working directory isn't yours; use a full path"
+		return "not an absolute path — the daemon's working directory is not the shell's; use a full path"
 	}
 	if target == "docker" {
 		return "" // a container path; can't verify it on this host
@@ -460,7 +487,7 @@ func generateConfig(o genOptions) ([]byte, error) {
 		b.WriteString("        checks:\n")
 		b.WriteString("          - min_total_bytes: 1MiB\n")
 		b.WriteString("          - newest_file_max_age: 8d\n")
-		b.WriteString("          # - path_exists: \"path/you/expect\" # assert a known file restored\n")
+		b.WriteString("          # - path_exists: \"a/known/path\" # assert a known file restored\n")
 	}
 	if o.L3 {
 		b.WriteString("      l3:\n")
@@ -529,7 +556,7 @@ func printGuidance(w io.Writer, o genOptions, dest string) {
 	case "host":
 		fmt.Fprintln(w, "Host (systemd): install per deploy/README.md. The host must provide the engine tools this config needs.")
 	case "local":
-		fmt.Fprintln(w, "Local: runs as you — data lives under your home; put the engine tools (borg/restic) on your PATH. Nothing to mount or install.")
+		fmt.Fprintln(w, "Local: runs as the current user — data lives under the home directory; the engine tools (borg/restic) must be on PATH. Nothing to mount or install.")
 	}
 
 	if secrets := secretFiles(o); len(secrets) > 0 {
@@ -538,7 +565,7 @@ func printGuidance(w io.Writer, o genOptions, dest string) {
 			fmt.Fprintf(w, "    %s\n", f)
 		}
 		if o.Target == "host" {
-			fmt.Fprintln(w, "  systemd runs redrill as its own user, so the secret must be owned/readable by it (a 0600 file you own isn't). Provision it with that owner, e.g.:")
+			fmt.Fprintln(w, "  systemd runs redrill as its own user, so the secret must be owned/readable by it (a 0600 file under another user's home isn't). Provision it with that owner, e.g.:")
 			fmt.Fprintln(w, "    sudo install -D -o redrill -g redrill -m600 <your-secret-file> /etc/redrill/secrets/<name>")
 			fmt.Fprintln(w, "  Verify before enabling the timer:  sudo -u redrill redrill doctor -c <config>")
 		}

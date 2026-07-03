@@ -57,6 +57,9 @@ func (a *alerter) afterRun(ctx context.Context, d config.Drill, res orchestrate.
 	if !a.active() {
 		return
 	}
+	// The run's ctx may have expired (that timeout is often why we're alerting);
+	// the store reads and the send must still work.
+	ctx = context.WithoutCancel(ctx)
 	a.mu.Lock()
 	wasStale := a.stale[d.Name]
 	a.mu.Unlock()

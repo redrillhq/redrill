@@ -41,6 +41,12 @@ func runHistory(args []string, stdout, stderr io.Writer) int {
 		printConfigError(stderr, *path, err)
 		return 3
 	}
+	// A typo'd NAME must not read as "no runs yet" with exit 0.
+	if _, _, found := findDrill(cfg, name); !found {
+		fmt.Fprintf(stderr, "redrill: no drill named %q in %s\n", name, *path)
+		printDrillNames(stderr, cfg, *path)
+		return 2
+	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		fmt.Fprintf(stderr, "redrill: cannot create data_dir %s: %v\n", cfg.DataDir, err)

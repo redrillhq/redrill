@@ -84,6 +84,31 @@ func TestScheduleNextIsUTC(t *testing.T) {
 	}
 }
 
+// Descriptors are UTC-pinned like everything else — robfig defaults them to
+// server-local time, which would shift @daily/@weekly fires by the host zone.
+func TestScheduleDescriptorIsUTC(t *testing.T) {
+	t.Parallel()
+	for _, spec := range []string{"@daily", "@weekly"} {
+		s, err := ParseSchedule(spec)
+		if err != nil {
+			t.Fatalf("ParseSchedule(%q): %v", spec, err)
+		}
+		now := time.Date(2026, time.June, 10, 12, 0, 0, 0, time.UTC)
+		next := s.Next(now).UTC()
+		if next.Hour() != 0 || next.Minute() != 0 {
+			t.Errorf("%s Next = %v, want midnight UTC", spec, next)
+		}
+		plus5 := now.In(time.FixedZone("UTC+5", 5*3600))
+		if got := s.Next(plus5).UTC(); !got.Equal(next) {
+			t.Errorf("%s Next differs by input zone: %v vs %v", spec, got, next)
+		}
+	}
+	// @every takes no location; the UTC prefix must not break it.
+	if _, err := ParseSchedule("@every 1h"); err != nil {
+		t.Errorf("ParseSchedule(@every 1h): %v", err)
+	}
+}
+
 func TestScheduleString(t *testing.T) {
 	t.Parallel()
 	s, err := ParseSchedule("Sun 04:10")

@@ -70,6 +70,10 @@ func seedFinishedRun(t *testing.T, st *store.Store, drill string, result store.R
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The orchestrator accumulates the monotonic counter alongside FinishRun.
+	if err := st.AddBytesRestored(ctx, drill, 1000); err != nil {
+		t.Fatal(err)
+	}
 	return id
 }
 

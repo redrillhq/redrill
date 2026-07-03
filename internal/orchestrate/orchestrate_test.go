@@ -108,6 +108,32 @@ func TestRunFailOnStaleNoProof(t *testing.T) {
 	}
 }
 
+// Proofs advance only when the whole run passes (DESIGN §9.8): a level that
+// passed inside a failed run proves nothing.
+func TestProofOnlyOnFullPass(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := fixtures.Dump(t, fixtures.DumpAge(time.Hour))
+	st := newStore(t)
+	levels := l1Full()
+	levels.L2 = &config.L2{
+		Restore: config.Restore{Scope: "full"},
+		Checks:  []config.Check{{Kind: "path_exists", Path: "not-there"}},
+	}
+	drill, src := drillFor(dir, levels)
+
+	res := runDrill(t, st, drill, src, RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
+	if res.Status != store.ResultFail {
+		t.Fatalf("result = %s, want fail (L2 path missing)", res.Status)
+	}
+	if _, ok, _ := st.GetProof(ctx, "app-db", "l1"); ok {
+		t.Error("L1 passed but the run failed: no proof may advance")
+	}
+	if _, ok, _ := st.GetProof(ctx, "app-db", "l2"); ok {
+		t.Error("a failed L2 must not record a proof")
+	}
+}
+
 // fail (backup bad) and error (auditor blind) must stay distinct.
 func TestRunErrorOnUnreadableDir(t *testing.T) {
 	t.Parallel()

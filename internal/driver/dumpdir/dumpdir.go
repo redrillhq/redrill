@@ -21,6 +21,8 @@ type Driver struct {
 	pattern string
 }
 
+var _ driver.SourceDriver = (*Driver)(nil)
+
 // New returns a dumpdir driver for files matching pattern (a filepath.Match
 // glob, e.g. "myapp-*.sql.gz").
 func New(dir, pattern string) *Driver {
@@ -89,6 +91,9 @@ func (d *Driver) Path(id string) string { return filepath.Join(d.dir, id) }
 func (d *Driver) Restore(ctx context.Context, sel driver.Selection, targetDir string) (driver.RestoreReport, error) {
 	var rep driver.RestoreReport
 	for _, id := range sel.SnapshotIDs {
+		if err := ctx.Err(); err != nil {
+			return rep, fmt.Errorf("dumpdir %s: restore: %w", d.dir, err)
+		}
 		n, err := copyFile(d.Path(id), filepath.Join(targetDir, id))
 		if err != nil {
 			return rep, fmt.Errorf("dumpdir %s: restore %s: %w", d.dir, id, err)

@@ -147,7 +147,7 @@ func TestListRunsNewestFirstAndLimit(t *testing.T) {
 	}
 }
 
-func TestFilesRestoredAndLastRunWithResult(t *testing.T) {
+func TestFilesRestoredAndLastBaselineRun(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := newStore(t)
@@ -163,25 +163,81 @@ func TestFilesRestoredAndLastRunWithResult(t *testing.T) {
 	if err := s.FinishRun(ctx, Run{ID: id2, Result: ResultFail, FilesRestored: 3, FinishedAt: epoch.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
+	// A restore-less pass (e.g. an L1-only --level run) must not become the
+	// baseline and reset it to zero.
+	id3, _ := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerManual, StartedAt: epoch.Add(2 * time.Hour)})
+	if err := s.FinishRun(ctx, Run{ID: id3, Result: ResultPass, FilesRestored: 0, FinishedAt: epoch.Add(2 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
 
 	if got, _ := s.GetRun(ctx, id1); got.FilesRestored != 120 {
 		t.Errorf("files_restored = %d, want 120", got.FilesRestored)
 	}
 
-	// Most recent passed run, not the later fail.
-	last, ok, err := s.LastRunWithResult(ctx, "d", ResultPass)
+	// Most recent pass that restored files: id1, not the fail, not the 0-file pass.
+	last, ok, err := s.LastBaselineRun(ctx, "d")
 	if err != nil || !ok {
-		t.Fatalf("LastRunWithResult: %v ok=%v", err, ok)
+		t.Fatalf("LastBaselineRun: %v ok=%v", err, ok)
 	}
 	if last.ID != id1 || last.FilesRestored != 120 {
-		t.Errorf("last passed run = id %d / %d files, want %d / 120", last.ID, last.FilesRestored, id1)
+		t.Errorf("baseline run = id %d / %d files, want %d / 120", last.ID, last.FilesRestored, id1)
 	}
-	if _, ok, _ := s.LastRunWithResult(ctx, "ghost", ResultPass); ok {
-		t.Error("ghost drill should have no passed run")
+	if _, ok, _ := s.LastBaselineRun(ctx, "ghost"); ok {
+		t.Error("ghost drill should have no baseline run")
 	}
 }
 
-func TestLatestFinishedRunAndSumBytes(t *testing.T) {
+// A recorded verdict is immutable: FinishRun writes exactly once.
+func TestFinishRunWriteOnce(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	id, err := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerManual, StartedAt: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRun(ctx, Run{ID: id, Result: ResultPass, FinishedAt: epoch.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRun(ctx, Run{ID: id, Result: ResultFail, FinishedAt: epoch.Add(time.Hour)}); err == nil {
+		t.Fatal("second FinishRun succeeded, want already-finished error")
+	}
+	got, err := s.GetRun(ctx, id)
+	if err != nil || got.Result != ResultPass {
+		t.Errorf("run result = %s err=%v, want pass held", got.Result, err)
+	}
+}
+
+// Runs a crashed process left without a verdict are finalized as error at
+// daemon startup; finished runs are untouched.
+func TestMarkAbandonedRuns(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	done, _ := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerSchedule, StartedAt: epoch})
+	if err := s.FinishRun(ctx, Run{ID: done, Result: ResultPass, FinishedAt: epoch.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	zombie, _ := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerSchedule, StartedAt: epoch.Add(time.Hour)})
+
+	now := epoch.Add(2 * time.Hour)
+	n, err := s.MarkAbandonedRuns(ctx, now)
+	if err != nil || n != 1 {
+		t.Fatalf("MarkAbandonedRuns = %d, %v; want 1, nil", n, err)
+	}
+	z, err := s.GetRun(ctx, zombie)
+	if err != nil || z.Result != ResultError || !z.FinishedAt.Equal(now) {
+		t.Errorf("zombie = %s finished %v err=%v, want error at %v", z.Result, z.FinishedAt, err, now)
+	}
+	d, _ := s.GetRun(ctx, done)
+	if d.Result != ResultPass {
+		t.Errorf("finished run result = %s, want pass untouched", d.Result)
+	}
+}
+
+func TestLatestFinishedRunAndBytesCounter(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := newStore(t)
@@ -190,8 +246,8 @@ func TestLatestFinishedRunAndSumBytes(t *testing.T) {
 	if _, ok, err := s.LatestFinishedRun(ctx, "d"); err != nil || ok {
 		t.Fatalf("LatestFinishedRun on empty: ok=%v err=%v", ok, err)
 	}
-	if total, err := s.SumBytesRestored(ctx, "d"); err != nil || total != 0 {
-		t.Fatalf("SumBytesRestored on empty: %d err=%v", total, err)
+	if total, err := s.BytesRestoredTotal(ctx, "d"); err != nil || total != 0 {
+		t.Fatalf("BytesRestoredTotal on empty: %d err=%v", total, err)
 	}
 
 	id1, _ := s.CreateRun(ctx, Run{Drill: "d", Trigger: TriggerSchedule, StartedAt: epoch})
@@ -215,12 +271,24 @@ func TestLatestFinishedRunAndSumBytes(t *testing.T) {
 		t.Errorf("latest finished = id %d (%s), want id %d (fail)", last.ID, last.Result, id2)
 	}
 
-	// SUM counts every run with bytes, finished or not (the running run has 0).
-	if total, err := s.SumBytesRestored(ctx, "d"); err != nil || total != 1500 {
-		t.Errorf("SumBytesRestored = %d err=%v, want 1500", total, err)
+	// The counter accumulates and survives run pruning (it lives outside runs).
+	if err := s.AddBytesRestored(ctx, "d", 1000); err != nil {
+		t.Fatal(err)
 	}
-	if total, _ := s.SumBytesRestored(ctx, "ghost"); total != 0 {
-		t.Errorf("SumBytesRestored ghost = %d, want 0", total)
+	if err := s.AddBytesRestored(ctx, "d", 500); err != nil {
+		t.Fatal(err)
+	}
+	if total, err := s.BytesRestoredTotal(ctx, "d"); err != nil || total != 1500 {
+		t.Errorf("BytesRestoredTotal = %d err=%v, want 1500", total, err)
+	}
+	if _, err := s.Prune(ctx, "d", 0, 1, epoch.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if total, err := s.BytesRestoredTotal(ctx, "d"); err != nil || total != 1500 {
+		t.Errorf("BytesRestoredTotal after prune = %d err=%v, want 1500 (counters are never pruned)", total, err)
+	}
+	if total, _ := s.BytesRestoredTotal(ctx, "ghost"); total != 0 {
+		t.Errorf("BytesRestoredTotal ghost = %d, want 0", total)
 	}
 }
 

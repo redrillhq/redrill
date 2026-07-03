@@ -50,7 +50,7 @@ server:                          # optional — omit the whole block to run head
 notify:                          # optional
   urls:                          # list of shoutrrr URLs (ntfy/telegram/discord/email/webhook/…)
     - "ntfy://ntfy.example.com/redrill"
-  events: [fail, error, recover, stale, weekly_digest]  # any subset of these five
+  events: [fail, error, recover, stale]  # default when urls is set; weekly_digest is accepted but not emitted yet
   healthchecks_url: ""           # string — http(s) dead-man ping per scheduler cycle
 
 sources:                         # list — keys depend on `type`
@@ -79,7 +79,7 @@ sources:                         # list — keys depend on `type`
 drills:                          # list
   - name: nextcloud-files        # string, required, unique
     source: nextcloud-borg       # string, required — must name a source above
-    schedule: "Sun 04:10"        # string, required — shorthand or cron (UTC)
+    schedule: "Sun 04:10"        # string, optional — shorthand or cron (UTC); omit for manual-only
     jitter: 20m                  # duration, optional — random delay [0, jitter)
     max_proof_age: 10d           # duration, optional — proof SLA; older ⇒ stale alert
     timeout: 2h                  # duration, optional — per-run timeout
@@ -108,7 +108,7 @@ drills:                          # list
       l3:                        # usability
         extract_path: "db/dump.sql"  # string — required for borg/restic; the dump inside the snapshot
         sandbox:
-          image: postgres:16     # string, required — pin to your production major
+          image: postgres:16     # string, required — pin to the production major
           env: { POSTGRES_PASSWORD: drill }  # map, optional
           network: none          # string, default none — only none in v1
           memory: 1GiB           # size, optional
@@ -152,7 +152,7 @@ drills:                          # list
 
 ### `server`
 
-Omit the block to run headless. When `listen` is set you **must** configure an
+Omit the block to run headless. When `listen` is set the config **must** include an
 auth mechanism *or* explicitly set `allow_no_auth: true`, otherwise validation
 fails (secure by default).
 
@@ -170,7 +170,7 @@ fails (secure by default).
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `urls` | list of string | unset | [shoutrrr](https://github.com/nicholas-fedor/shoutrrr) URLs: ntfy, Telegram, Discord, email, webhooks… |
-| `events` | list of string | unset | Any subset of `fail`, `error`, `recover`, `stale`, `weekly_digest`. |
+| `events` | list of string | `fail, error, recover, stale` when `urls` is set | Any subset of `fail`, `error`, `recover`, `stale`, `weekly_digest`. (`weekly_digest` is accepted but nothing emits it until the digest feature lands.) |
 | `healthchecks_url` | string | unset | Must be an `http(s)` URL; pinged once per scheduler cycle as a dead-man heartbeat. |
 
 > Notifications are emitted by the **daemon** (`redrill serve`). A manual
@@ -228,7 +228,7 @@ A drill is a scheduled audit of one source.
 |---|---|---|---|
 | `name` | string | — *(required)* | Unique across drills. |
 | `source` | string | — *(required)* | Must match a source `name`. |
-| `schedule` | string | — *(required)* | Shorthand or cron — see [Schedule](#the-schedule-string). |
+| `schedule` | string | unset | Shorthand or cron — see [Schedule](#the-schedule-string). Unset = a **manual-only** drill: it never auto-fires (run it via `redrill run`, the API, or a post-backup hook); the Proof SLA still applies. `status` shows it as `manual`. |
 | `jitter` | [duration](#duration) | unset | Random delay added to each fire, in `[0, jitter)`. |
 | `max_proof_age` | [duration](#duration) | unset | The proof SLA. If no proof is newer than this the drill is `stale` — computed from timestamps, so it fires even after daemon downtime. |
 | `timeout` | [duration](#duration) | unset | Per-run timeout. |
@@ -256,13 +256,16 @@ erroring level short-circuits the higher levels to `skipped`.
 L1 keys are **source-type specific**; mixing them (e.g. `file_min_bytes` on a
 borg source) is a validation error.
 
+At least one check that can fail is required — an empty `l1:` block would pass
+with zero evidence (advisory `size_anomaly_pct` alone doesn't count).
+
 **borg / restic:**
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `native_check` | bool | unset | Run the engine's own check (`borg check` / `restic check`). |
 | `snapshot_max_age` | [duration](#duration) | unset | `fail` if the newest snapshot is older than this. |
-| `size_anomaly_pct` | int | unset | Advisory (always passes, may warn): flag a latest snapshot more than this percent below the trailing average. `0..100`. |
+| `size_anomaly_pct` | int | unset | Advisory (always passes, may warn; weak-labeled): flag a latest snapshot more than this percent below the trailing average. `0..100`. |
 
 **dumpdir:**
 
@@ -278,7 +281,7 @@ Restore a sample (or the full set) into scratch, then assert against it.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `restore.scope` | string | `sample` | `sample` \| `full`. |
+| `restore.scope` | string | `sample` | `sample` \| `full`. A sample scope requires `sample` and/or `include_paths` (an empty sample would silently restore everything, bypassing the quota preflight). |
 | `restore.sample.files` | int | unset | Random files to restore (when `scope: sample`). |
 | `restore.sample.newest` | int | unset | Plus this many newest files. |
 | `restore.include_paths` | list of string | unset | Restrict/seed the restore to these subpaths. |
@@ -292,11 +295,11 @@ container runtime; without one, L3 reports `skipped` (never a silent pass).
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `extract_path` | string | *(required for borg/restic)* | Path of the dump inside the snapshot to extract and load. Not used by `dumpdir` (already a single file). |
-| `sandbox.image` | string | — *(required)* | Container image. Pin to your production major (image major ≥ dump major, or it's a version-trap `fail`). |
+| `sandbox.image` | string | — *(required)* | Container image. Pin to the production major (image major ≥ dump major, or it's a version-trap `fail`). |
 | `sandbox.env` | map | unset | Environment for the sandbox (e.g. `POSTGRES_PASSWORD`). |
 | `sandbox.network` | string | `none` | Only `none` is supported in v1. |
 | `sandbox.memory` | [size](#size) | unset | Memory limit. |
-| `sandbox.timeout` | [duration](#duration) | unset | Sandbox boot/operation timeout. |
+| `sandbox.timeout` | [duration](#duration) | unset | Bounds the sandbox boot (create, readiness, dump injection); a sandbox that never comes up is an `error`, not a hang. |
 | `load` | string | `auto` | `auto` (detect `pg_restore` vs `psql` by dump format) \| `pg_restore` \| `psql`. |
 | `checks` | list | — *(≥1 required)* | L3 checks — an L3 with no checks proves nothing and is rejected. |
 
@@ -310,14 +313,14 @@ Each check is a single-key mapping, e.g. `- path_exists: "config/config.php"`.
 |---|---|---|---|
 | `path_exists` | L2 | string path | `fail` if the path is absent in the restore. |
 | `path_absent` | L2 | string path | `fail` if the path **is** present. |
-| `canary_file` | L2 *(weak)* | string path | Like `path_exists` but comfort-only — weak-labeled, never counts as sole proof. |
-| `hash_match` | L2 | bool | Verify restored bytes against an engine manifest. borg/restic expose none, so this relies on the engine's extract-time chunk verification (passes, clearly labeled). |
+| `canary_file` | L2 *(weak)* | string path | Like `path_exists` but comfort-only — weak-labeled so reports and the UI never present it as proof. |
+| `hash_match` | L2 | bool | borg/restic only (`false` disables it). No engine exposes an independent manifest, so this records the engine's own extract-time chunk verification (passes, clearly labeled). Not valid for `dumpdir` — a plain copy verifies nothing. |
 | `newest_file_max_age` | L2 | [duration](#duration) | `fail` if the newest restored file is older than this. |
 | `min_total_bytes` | L2 | [size](#size) | `fail` if total restored bytes is below this. |
 | `file_count_tolerance_pct` | L2 | int (percent) | `fail` if the restored file count deviates more than this percent from the last proven run. |
 | `sql` | L3 | `{query, expect}` | Run `query`, compare the scalar to `expect`. Mismatch ⇒ `fail`; a query or coercion error ⇒ `error`. See [expect](#the-expect-predicate). |
 | `sql_no_error` | L3 | string query | `fail` if the query errors (the restored data is bad). |
-| `exec` | L2 / L3 | string | ⚠️ **Accepted by validation but not implemented in v1** — currently a no-op that produces no evidence. Don't rely on it yet. |
+| `exec` | L2 / L3 | string | **Not implemented yet — rejected by validation** (a silently-dropped check could let a level pass while asserting nothing). Planned. |
 
 ### The `sql` check
 
@@ -334,7 +337,7 @@ Each check is a single-key mapping, e.g. `- path_exists: "config/config.php"`.
 | `> N`, `>= N`, `== N`, `!= N` | Numeric comparison of the scalar. |
 | `between A B` | Inclusive range `A ≤ value ≤ B`. |
 | `age < DUR`, `age > DUR` | Parse the scalar as a timestamp; compare `now − value`. `DUR` uses [duration](#duration) syntax. |
-| `matches REGEX` | Go-regexp match against the scalar. |
+| `matches REGEX` | Go regexp, matched against the **whole** scalar (anchored — `matches ok` does not match `not ok`). |
 | `nonempty` | True if the scalar is non-whitespace. |
 
 If the scalar can't be coerced to the needed type (not a number for `> N`, not

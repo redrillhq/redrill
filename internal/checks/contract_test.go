@@ -112,12 +112,12 @@ var contractCases = []contractCase{
 		return SnapshotMaxAge{Max: 36 * time.Hour}, CheckEnv{Now: now}
 	}},
 
-	// size_anomaly is advisory: it always passes and only flags in Actual, so it
+	// size_anomaly is advisory: it always passes (weak-labeled) and only flags in Actual, so it
 	// has no fail direction (TestContractCoversEveryKind exempts it).
-	{kind: kindSizeAnomaly, name: "normal/pass", want: Pass, build: func(_ *testing.T) (Check, CheckEnv) {
+	{kind: kindSizeAnomaly, name: "normal/pass", want: Pass, weak: true, build: func(_ *testing.T) (Check, CheckEnv) {
 		return SizeAnomaly{LatestSize: 100, TrailingSizes: []int64{100, 100}, Pct: 40}, CheckEnv{}
 	}},
-	{kind: kindSizeAnomaly, name: "shrunken/pass-but-flagged", want: Pass, actualHas: "ANOMALY", build: func(_ *testing.T) (Check, CheckEnv) {
+	{kind: kindSizeAnomaly, name: "shrunken/pass-but-flagged", want: Pass, weak: true, actualHas: "ANOMALY", build: func(_ *testing.T) (Check, CheckEnv) {
 		return SizeAnomaly{LatestSize: 10, TrailingSizes: []int64{100, 100}, Pct: 40}, CheckEnv{}
 	}},
 

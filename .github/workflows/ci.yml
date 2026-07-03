@@ -63,7 +63,9 @@ jobs:
           go-version-file: go.mod
       - run: make test
 
-  # Real-engine drills in containers (build tag: integration). Needs Docker; borg tests skip if borg is absent.
+  # Real-engine drills in containers (build tag: integration). Needs Docker plus
+  # the engine binaries — without them the borg/restic tests skip silently and
+  # the gate stops gating.
   integration:
     needs: web
     runs-on: ubuntu-latest
@@ -74,9 +76,11 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends borgbackup restic
       - run: make test-integration
 
-  # The sabotage kit (build tag: sabotage): every fixture must be flagged. Engine fixtures need Docker + borg.
+  # The sabotage kit (build tag: sabotage): every fixture must be flagged. Engine
+  # fixtures need Docker + borg + restic, so install the engines here too.
   sabotage:
     needs: web
     runs-on: ubuntu-latest
@@ -87,4 +91,5 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends borgbackup restic
       - run: make test-sabotage

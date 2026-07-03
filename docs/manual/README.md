@@ -1,6 +1,6 @@
 # Redrill manual
 
-Documentation for operating Redrill — scheduled restore drills that prove your
+Documentation for operating Redrill — scheduled restore drills that prove the
 backups are restorable by actually restoring them.
 
 - [Configuration reference](configuration.md) — every option in the YAML config

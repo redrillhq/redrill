@@ -37,7 +37,8 @@ func (c SnapshotMaxAge) Run(_ context.Context, env CheckEnv) (Evidence, error) {
 	return ev, nil
 }
 
-// Advisory: always passes, only flags in Actual.
+// Advisory: always passes, only flags in Actual; weak-labeled so the UI/report
+// never present it as proof.
 type SizeAnomaly struct {
 	LatestSize    int64
 	TrailingSizes []int64
@@ -47,7 +48,7 @@ type SizeAnomaly struct {
 func (c SizeAnomaly) Kind() string { return kindSizeAnomaly }
 
 func (c SizeAnomaly) Run(_ context.Context, _ CheckEnv) (Evidence, error) {
-	ev := Evidence{Kind: kindSizeAnomaly, Status: Pass, Expected: fmt.Sprintf("latest within %d%% of trailing avg", c.Pct)}
+	ev := Evidence{Kind: kindSizeAnomaly, Status: Pass, Weak: true, Expected: fmt.Sprintf("latest within %d%% of trailing avg", c.Pct)}
 	if len(c.TrailingSizes) == 0 {
 		ev.Actual = "insufficient history"
 		return ev, nil

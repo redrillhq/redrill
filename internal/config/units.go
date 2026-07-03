@@ -17,6 +17,13 @@ type Duration time.Duration
 
 func (d Duration) Duration() time.Duration { return time.Duration(d) }
 
+// ParseDuration parses the config duration grammar (for callers pre-validating
+// free-text input, e.g. redrill init).
+func ParseDuration(s string) (Duration, error) {
+	v, err := parseDuration(s)
+	return Duration(v), err
+}
+
 func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	var s string
 	if err := n.Decode(&s); err != nil {

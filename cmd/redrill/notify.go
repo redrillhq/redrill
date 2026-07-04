@@ -30,16 +30,24 @@ func ioPolicy(cfg *config.Config) exec.IOPolicy {
 
 const staleSweepInterval = time.Hour
 
-// alerter turns finished runs and proof staleness into notifications. It holds
-// the dedup state that keeps one stale episode from re-alerting every sweep.
+// digestSchedule is when the weekly_digest fires; ParseSchedule pins it to
+// UTC. Fixed in v1 — configurability is the Phase-3 digest polish.
+const digestSchedule = "Sun 08:00"
+
+// alerter turns finished runs, proof staleness, and the weekly digest slot
+// into notifications. It holds the dedup state that keeps one stale episode
+// from re-alerting every sweep.
 type alerter struct {
 	n      *notify.Notifier
 	st     *store.Store
 	drills map[string]config.Drill
+	order  []config.Drill // config order, for digest lines
 	now    func() time.Time
+	digest scheduler.Schedule
 
-	mu    sync.Mutex
-	stale map[string]bool // drills currently in a stale-alerted state
+	mu         sync.Mutex
+	stale      map[string]bool // drills currently in a stale-alerted state
+	digestMark time.Time       // digest slots at or before this are spent
 }
 
 func newAlerter(n *notify.Notifier, st *store.Store, drills []config.Drill, now func() time.Time) *alerter {
@@ -47,7 +55,14 @@ func newAlerter(n *notify.Notifier, st *store.Store, drills []config.Drill, now 
 	for _, d := range drills {
 		m[d.Name] = d
 	}
-	return &alerter{n: n, st: st, drills: m, now: now, stale: map[string]bool{}}
+	sched, err := scheduler.ParseSchedule(digestSchedule)
+	if err != nil {
+		panic("digest schedule must parse: " + err.Error()) // a constant; unreachable
+	}
+	// digestMark starts at construction: slots that passed while the daemon was
+	// down never fire late, so a restart cannot duplicate a digest. The cost is
+	// a skipped week when the daemon is down across the slot.
+	return &alerter{n: n, st: st, drills: m, order: drills, now: now, digest: sched, stale: map[string]bool{}, digestMark: now()}
 }
 
 func (a *alerter) active() bool { return a != nil && a.n != nil }
@@ -124,7 +139,8 @@ func (a *alerter) sweepStale(ctx context.Context) {
 }
 
 // runSweeps sweeps once at startup (catching drills that went stale while the
-// daemon was down) then on a ticker until ctx is canceled.
+// daemon was down) then on a ticker until ctx is canceled. Each sweep also
+// checks the weekly digest slot.
 func (a *alerter) runSweeps(ctx context.Context) {
 	if !a.active() {
 		return
@@ -138,8 +154,49 @@ func (a *alerter) runSweeps(ctx context.Context) {
 			return
 		case <-t.C:
 			a.sweepStale(ctx)
+			a.maybeDigest(ctx)
 		}
 	}
+}
+
+// maybeDigest sends the weekly digest when a digest slot has passed since the
+// last check — at most once per slot.
+func (a *alerter) maybeDigest(ctx context.Context) {
+	if !a.active() || !a.n.DigestEnabled() {
+		return
+	}
+	now := a.now()
+	a.mu.Lock()
+	due := !a.digest.Next(a.digestMark).After(now)
+	if due {
+		a.digestMark = now
+	}
+	a.mu.Unlock()
+	if !due {
+		return
+	}
+	a.n.DispatchDigest(ctx, a.buildDigest(ctx, now))
+}
+
+// buildDigest is best-effort: a store hiccup degrades a line, never blocks
+// the digest.
+func (a *alerter) buildDigest(ctx context.Context, now time.Time) notify.Digest {
+	d := notify.Digest{Now: now}
+	for _, drill := range a.order {
+		level := scheduler.HeadlineLevel(drill)
+		proven := a.proof(ctx, drill.Name, level)
+		e := notify.DigestEntry{
+			Drill: drill.Name, Level: level, LastProven: proven,
+			Stale:       scheduler.Stale(drill.MaxProofAge.Duration(), proven, now),
+			MaxProofAge: drill.MaxProofAge.Duration(),
+		}
+		if runs, err := a.st.ListRuns(ctx, drill.Name, 1); err == nil && len(runs) > 0 && runs[0].Result != "" {
+			e.LastResult = string(runs[0].Result)
+			e.Bytes = runs[0].BytesRestored
+		}
+		d.Entries = append(d.Entries, e)
+	}
+	return d
 }
 
 // prevResult returns the result of the run before runID, "" if none.

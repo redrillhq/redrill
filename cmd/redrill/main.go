@@ -85,8 +85,10 @@ Commands:
   run        run a drill now: NAME, --all, or pick interactively
   status     show each drill's last run, proof age, next run, and SLA state
   history    show a drill's past runs
+  report     render the proof report from recorded evidence (md or html)
   serve      run the scheduler daemon
   doctor     check the environment: engines, container runtime, scratch, repos
+  demo       run a self-contained sabotage demo in a throwaway workspace
   version    print version information
 
 Exit codes: 0 ok · 1 drill fail · 2 infra error · 3 config error
@@ -112,10 +114,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runStatus(args[1:], stdout, stderr)
 	case "history":
 		return runHistory(args[1:], stdout, stderr)
+	case "report":
+		return runReport(args[1:], stdout, stderr)
 	case "serve":
 		return runServe(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctor(args[1:], stdout, stderr)
+	case "demo":
+		return runDemo(args[1:], stdout, stderr)
 	case "version":
 		return runVersion(args[1:], stdout, stderr)
 	case "help", "-h", "--help":

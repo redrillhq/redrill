@@ -1,0 +1,11 @@
+# the sabotage demo is self-contained: healthy PASS, sabotaged FAIL, exit 0
+redrill demo sabotage --no-sandbox
+stdout 'result: PASS — restorability proven'
+stdout 'FAIL  file_min_bytes'
+stdout 'result: FAIL — the dead backup was caught'
+
+# demo without a name, or with an unknown one, prints usage
+! redrill demo
+stderr 'redrill demo sabotage'
+! redrill demo chaos
+stderr 'redrill demo sabotage'

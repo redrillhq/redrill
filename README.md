@@ -137,11 +137,13 @@ redrill doctor            # preflight: engines, container runtime, scratch space
 redrill run [NAME]        # run a drill now: a NAME, --all, or pick interactively  (--level l1|l2|l3)
 redrill status            # table: each drill's last run, proof age, next run, SLA state
 redrill history NAME      # past runs with verdicts and durations      (-n 20)
+redrill report            # render the proof report from recorded evidence  (--format md|html, --out FILE)
 redrill serve             # the daemon: scheduler + notifications
+redrill demo sabotage     # self-contained demo: drill a healthy backup, kill it, watch redrill catch it
 redrill version
 ```
 
-Every command except `serve` takes `--json`, and all resolve the config from `-c`, else `$REDRILL_CONFIG`, else `/etc/redrill/config.yaml`. Exit codes are stable: 0 ok, 1 a drill failed, 2 infra error, 3 bad config. Drop `redrill status` in a terminal for the whole picture:
+Every command except `serve` and `demo` takes `--json`, and all resolve the config from `-c`, else `$REDRILL_CONFIG`, else `/etc/redrill/config.yaml`. Exit codes are stable: 0 ok, 1 a drill failed, 2 infra error, 3 bad config. Drop `redrill status` in a terminal for the whole picture:
 
 ```
 DRILL             LAST RUN      PROVEN        NEXT RUN   SLA

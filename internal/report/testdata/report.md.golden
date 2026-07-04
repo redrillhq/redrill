@@ -1,0 +1,51 @@
+# Redrill proof report
+
+Generated 2026-07-04 09:00 UTC.
+
+**1 of 3 datasets proven within SLA.**
+
+## app-db — within SLA
+
+- Source: dumps (dumpdir)
+- Schedule: @daily · proof SLA 10d
+- Proven: l1 3d ago (2026-07-01 09:00 UTC) · l3 3d ago (2026-07-01 09:00 UTC)
+
+### Last run — PASS (run 1, schedule, 3d ago, 12.3s, 50 MiB / 240 files restored)
+
+| Level | Status | Duration | Summary |
+|---|---|---|---|
+| l1 | PASS | 400ms | 3 checks passed |
+| l3 | PASS | 11.9s | sandbox booted, 1 check passed |
+
+| Check | Target | Expected | Actual | Status |
+|---|---|---|---|---|
+| file_min_bytes | app-db-2026-07-01.sql.gz | > 1024 | 52428800 | PASS |
+| compression_test | app-db-2026-07-01.sql.gz | valid gzip | ok | PASS |
+| canary_file | backup-canary.txt | present | present | PASS (weak) |
+| sql | select count(*) from users | == 5 | 5 | PASS |
+
+## photos — STALE (no l1 proof within 10d)
+
+- Source: media (dumpdir)
+- Schedule: manual only · proof SLA 10d
+- Proven: never
+
+No runs recorded.
+
+## wiki — STALE (no l3 proof within 10d)
+
+- Source: dumps (dumpdir)
+- Schedule: @weekly · proof SLA 10d
+- Proven: l1 20d ago (2026-06-14 09:00 UTC)
+
+### Last run — FAIL (run 2, schedule, 1h ago, 700ms)
+
+| Level | Status | Duration | Summary |
+|---|---|---|---|
+| l1 | FAIL | 700ms | file_min_bytes failed |
+| l3 | SKIPPED | - | skipped: l1 failed |
+
+| Check | Target | Expected | Actual | Status |
+|---|---|---|---|---|
+| file_min_bytes | wiki-2026-07-04.sql.gz | > 1024 | 0 | FAIL |
+| compression_test | wiki-2026-07-04.sql.gz | valid gzip | unexpected EOF | FAIL |

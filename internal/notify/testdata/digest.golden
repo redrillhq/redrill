@@ -1,0 +1,8 @@
+redrill: weekly digest — 2 of 4 proven within SLA
+
+Proof digest, 2026-07-05 08:00 UTC.
+
+app-db: proven 3d ago (L3) · ok · 50 MiB verified
+photos: never proven · STALE (SLA 10d)
+wiki: proven 20d ago (L3) · STALE (SLA 10d) · last run: fail
+scratchpad: proven 1h ago (L1) · no SLA

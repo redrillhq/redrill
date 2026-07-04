@@ -50,7 +50,7 @@ server:                          # optional — omit the whole block to run head
 notify:                          # optional
   urls:                          # list of shoutrrr URLs (ntfy/telegram/discord/email/webhook/…)
     - "ntfy://ntfy.example.com/redrill"
-  events: [fail, error, recover, stale]  # default when urls is set; weekly_digest is accepted but not emitted yet
+  events: [fail, error, recover, stale]  # default when urls is set; add weekly_digest for the Sunday summary
   healthchecks_url: ""           # string — http(s) dead-man ping per scheduler cycle
 
 sources:                         # list — keys depend on `type`
@@ -170,7 +170,7 @@ fails (secure by default).
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `urls` | list of string | unset | [shoutrrr](https://github.com/nicholas-fedor/shoutrrr) URLs: ntfy, Telegram, Discord, email, webhooks… |
-| `events` | list of string | `fail, error, recover, stale` when `urls` is set | Any subset of `fail`, `error`, `recover`, `stale`, `weekly_digest`. (`weekly_digest` is accepted but nothing emits it until the digest feature lands.) |
+| `events` | list of string | `fail, error, recover, stale` when `urls` is set | Any subset of `fail`, `error`, `recover`, `stale`, `weekly_digest`. `weekly_digest` (opt-in — not in the default set) is the weekly proof summary: every dataset, proof age, bytes verified. Sent Sundays at 08:00 UTC while the daemon runs; a slot missed during downtime is skipped, never sent late. |
 | `healthchecks_url` | string | unset | Must be an `http(s)` URL; pinged once per scheduler cycle as a dead-man heartbeat. |
 
 > Notifications are emitted by the **daemon** (`redrill serve`). A manual

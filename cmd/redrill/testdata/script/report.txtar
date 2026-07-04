@@ -1,0 +1,42 @@
+# a run records evidence, then report renders the proof picture from it
+redrill run app-db -c cfg.yaml
+stdout 'PASS'
+
+redrill report -c cfg.yaml
+stdout '# Redrill proof report'
+stdout '1 of 1 datasets proven within SLA'
+stdout 'app-db — within SLA'
+stdout 'file_min_bytes'
+
+# html goes to a file; stdout stays clean
+redrill report -c cfg.yaml --format html --out report.html
+! stdout .
+exists report.html
+grep '<title>Redrill proof report</title>' report.html
+
+# --json is machine-readable
+redrill report -c cfg.yaml --json
+stdout '"proven_within_sla": 1'
+
+# an unknown format is a usage error
+! redrill report -c cfg.yaml --format pdf
+stderr 'must be md or html'
+
+# a missing config is a config error
+! redrill report -c missing.yaml
+stderr 'no config file'
+
+-- cfg.yaml --
+version: 1
+data_dir: data
+scratch: {dir: scratch}
+sources:
+  - {name: dumps, type: dumpdir, path: backups, pattern: "*.sql.gz"}
+drills:
+  - name: app-db
+    source: dumps
+    max_proof_age: 10d
+    levels:
+      l1: {file_min_bytes: 1}
+-- backups/app.sql.gz --
+file_min_bytes counts bytes only, so a plain-text stand-in dump works here

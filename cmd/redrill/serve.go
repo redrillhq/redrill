@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -94,6 +95,14 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 		log.Warn("scratch cleanup failed", "error", err.Error())
 	} else if n > 0 {
 		log.Info("removed stale scratch dirs", "count", n)
+	}
+	// A renamed drill silently orphans its proof chain (the SLA would read
+	// never-proven with no hint why) — say so at startup.
+	if proofDrills, err := st.ProofDrills(startCtx); err != nil {
+		log.Warn("proof-drill listing failed", "error", err.Error())
+	} else if orphans := orphanedProofs(cfg.Drills, proofDrills); len(orphans) > 0 {
+		log.Warn("proofs exist for drills not in the config (renamed or removed? proof history does not follow a rename)",
+			"drills", strings.Join(orphans, ", "))
 	}
 	executor := buildExecutor(startCtx, cfg, log)
 	if executor.sandbox != nil {
@@ -226,6 +235,21 @@ func startHTTP(ctx context.Context, cfg *config.Config, st *store.Store, clock f
 		}
 	}()
 	return httpSrv, 0
+}
+
+// orphanedProofs returns the proof-holding drill names absent from the config.
+func orphanedProofs(drills []config.Drill, proofDrills []string) []string {
+	known := make(map[string]bool, len(drills))
+	for _, d := range drills {
+		known[d.Name] = true
+	}
+	var out []string
+	for _, name := range proofDrills {
+		if !known[name] {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // pingHealthchecks sends a bounded dead-man heartbeat GET; failures are logged,

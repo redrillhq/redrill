@@ -10,23 +10,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/redrillhq/redrill/internal/driver"
+	"github.com/redrillhq/redrill/internal/driver/subproc"
 )
 
-// Runner runs a command, returning stdout, stderr, and exit code. err is non-nil
-// only when the process could not start or the context was canceled; a non-zero
-// exit is reported via exitCode so callers can map restic's outcome themselves.
-// dir is the working directory.
-type Runner func(ctx context.Context, dir string, env []string, name string, args []string) (stdout, stderr []byte, exitCode int, err error)
+// Runner is the shared subprocess runner; restic maps its exit semantics
+// itself where they carry a verdict (restic check: any positive exit = repo
+// bad, negative = died without a code).
+type Runner = subproc.Runner
 
 type Driver struct {
 	repo           string
@@ -83,7 +80,7 @@ func WithRunner(r Runner) Option {
 var _ driver.SourceDriver = (*Driver)(nil)
 
 func New(repo string, opts ...Option) *Driver {
-	d := &Driver{repo: repo, binary: "restic", run: ExecRunner}
+	d := &Driver{repo: repo, binary: "restic", run: subproc.ExecRunner}
 	for _, o := range opts {
 		o(d)
 	}
@@ -100,15 +97,14 @@ func (d *Driver) Capabilities() driver.Capabilities {
 // The repo rides RESTIC_REPOSITORY too: backend URLs can embed credentials
 // (rest:https://user:pass@host/), which argv would expose to `ps`.
 func (d *Driver) env() []string {
-	env := os.Environ()
-	env = append(env, "RESTIC_REPOSITORY="+d.repo)
+	extra := []string{"RESTIC_REPOSITORY=" + d.repo}
 	if d.password != "" {
-		env = append(env, "RESTIC_PASSWORD="+d.password)
+		extra = append(extra, "RESTIC_PASSWORD="+d.password)
 	}
 	for k, v := range d.backendEnv {
-		env = append(env, k+"="+v)
+		extra = append(extra, k+"="+v)
 	}
-	return env
+	return subproc.Env(extra...)
 }
 
 // global prefixes an optional rate limit before a subcommand.
@@ -121,24 +117,17 @@ func (d *Driver) global(args ...string) []string {
 }
 
 func (d *Driver) Validate(ctx context.Context) error {
-	_, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, d.global("snapshots", "--no-lock", "--json"))
-	if err != nil {
-		return fmt.Errorf("restic snapshots %s: %w", d.repo, err)
-	}
-	if exit != 0 {
-		return fmt.Errorf("restic snapshots %s: exit %d: %s", d.repo, exit, oneLine(stderr))
-	}
-	return nil
+	_, err := subproc.Output(ctx, d.run, "", d.env(), d.binary,
+		d.global("snapshots", "--no-lock", "--json"), "restic snapshots "+d.repo)
+	return err
 }
 
 // ListSnapshots returns the repo's snapshots, newest first.
 func (d *Driver) ListSnapshots(ctx context.Context) ([]driver.Snapshot, error) {
-	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, d.global("snapshots", "--no-lock", "--json"))
+	stdout, err := subproc.Output(ctx, d.run, "", d.env(), d.binary,
+		d.global("snapshots", "--no-lock", "--json"), "restic snapshots "+d.repo)
 	if err != nil {
-		return nil, fmt.Errorf("restic snapshots %s: %w", d.repo, err)
-	}
-	if exit != 0 {
-		return nil, fmt.Errorf("restic snapshots %s: exit %d: %s", d.repo, exit, oneLine(stderr))
+		return nil, err
 	}
 	return parseSnapshots(stdout)
 }
@@ -157,11 +146,11 @@ func (d *Driver) NativeCheck(ctx context.Context, _ driver.NativeCheckOpts) (dri
 	case exit == 0:
 		return driver.Report{OK: true, Summary: "restic check passed"}, nil
 	case exit < 0:
-		return driver.Report{}, fmt.Errorf("restic check %s: died without exit code: %s", d.repo, oneLine(stderr))
+		return driver.Report{}, fmt.Errorf("restic check %s: died without exit code: %s", d.repo, subproc.OneLine(stderr))
 	}
-	summary := oneLine(stderr)
+	summary := subproc.OneLine(stderr)
 	if summary == "" {
-		summary = oneLine(stdout)
+		summary = subproc.OneLine(stdout)
 	}
 	return driver.Report{OK: false, Summary: summary}, nil
 }
@@ -169,24 +158,20 @@ func (d *Driver) NativeCheck(ctx context.Context, _ driver.NativeCheckOpts) (dri
 // ListFiles returns the regular-file entries of a snapshot, with the snapshot's
 // single backup root stripped so paths are relative (engine-agnostic, like borg).
 func (d *Driver) ListFiles(ctx context.Context, id string) ([]driver.FileEntry, error) {
-	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, d.global("ls", "--no-lock", "--json", id))
+	stdout, err := subproc.Output(ctx, d.run, "", d.env(), d.binary,
+		d.global("ls", "--no-lock", "--json", id), "restic ls "+id)
 	if err != nil {
-		return nil, fmt.Errorf("restic ls %s: %w", id, err)
-	}
-	if exit != 0 {
-		return nil, fmt.Errorf("restic ls %s: exit %d: %s", id, exit, oneLine(stderr))
+		return nil, err
 	}
 	return parseFiles(stdout)
 }
 
 // SnapshotSize returns a snapshot's restore (uncompressed) size.
 func (d *Driver) SnapshotSize(ctx context.Context, id string) (int64, error) {
-	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, d.global("stats", "--no-lock", "--json", "--mode", "restore-size", id))
+	stdout, err := subproc.Output(ctx, d.run, "", d.env(), d.binary,
+		d.global("stats", "--no-lock", "--json", "--mode", "restore-size", id), "restic stats "+id)
 	if err != nil {
-		return 0, fmt.Errorf("restic stats %s: %w", id, err)
-	}
-	if exit != 0 {
-		return 0, fmt.Errorf("restic stats %s: exit %d: %s", id, exit, oneLine(stderr))
+		return 0, err
 	}
 	return parseStatsSize(stdout)
 }
@@ -215,29 +200,23 @@ func (d *Driver) Restore(ctx context.Context, sel driver.Selection, targetDir st
 	for _, p := range sel.Paths {
 		args = append(args, "--include", joinRoot(root, p))
 	}
-	_, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, args)
-	if err != nil {
-		return driver.RestoreReport{}, fmt.Errorf("restic restore %s: %w", id, err)
-	}
-	if exit != 0 {
-		return driver.RestoreReport{}, fmt.Errorf("restic restore %s: exit %d: %s", id, exit, oneLine(stderr))
+	if _, err := subproc.Output(ctx, d.run, "", d.env(), d.binary, args, "restic restore "+id); err != nil {
+		return driver.RestoreReport{}, err
 	}
 
 	if err := promote(stage, root, targetDir); err != nil {
 		return driver.RestoreReport{}, err
 	}
-	return dirReport(targetDir)
+	return subproc.DirReport(targetDir)
 }
 
 // snapshotRoot returns a snapshot's single backup path (stripped on restore), or
 // "" when it has none or several (then the absolute layout is kept).
 func (d *Driver) snapshotRoot(ctx context.Context, id string) (string, error) {
-	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, d.global("snapshots", "--no-lock", "--json", id))
+	stdout, err := subproc.Output(ctx, d.run, "", d.env(), d.binary,
+		d.global("snapshots", "--no-lock", "--json", id), "restic snapshots "+id)
 	if err != nil {
-		return "", fmt.Errorf("restic snapshots %s: %w", id, err)
-	}
-	if exit != 0 {
-		return "", fmt.Errorf("restic snapshots %s: exit %d: %s", id, exit, oneLine(stderr))
+		return "", err
 	}
 	paths, err := parseSnapshotPaths(stdout)
 	if err != nil {
@@ -396,63 +375,4 @@ func sortByTimeDesc(snaps []driver.Snapshot) {
 			snaps[j], snaps[j-1] = snaps[j-1], snaps[j]
 		}
 	}
-}
-
-func oneLine(b []byte) string {
-	s := strings.TrimSpace(string(b))
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	return s
-}
-
-func dirReport(dir string) (driver.RestoreReport, error) {
-	var rep driver.RestoreReport
-	err := filepath.WalkDir(dir, func(_ string, e fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if e.IsDir() {
-			return nil
-		}
-		info, err := e.Info()
-		if err != nil {
-			return err
-		}
-		rep.Files++
-		rep.Bytes += info.Size()
-		return nil
-	})
-	if err != nil {
-		return driver.RestoreReport{}, fmt.Errorf("measure restore dir: %w", err)
-	}
-	return rep, nil
-}
-
-// ExecRunner is the default Runner; the exec layer wraps it with nice/ionice when
-// an IO policy is configured.
-func ExecRunner(ctx context.Context, dir string, env []string, name string, args []string) ([]byte, []byte, int, error) {
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: argv is built here, not from user input
-	cmd.Dir = dir
-	cmd.Env = env
-	// SIGTERM first so the engine can release its repo lock; kill after WaitDelay.
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	cmd.WaitDelay = 10 * time.Second
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	// A kill by ctx must surface as the runner's error, never as an engine exit
-	// code (a timed-out check would otherwise read as "backup corrupt").
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return stdout.Bytes(), stderr.Bytes(), -1, ctxErr
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return stdout.Bytes(), stderr.Bytes(), exitErr.ExitCode(), nil
-	}
-	if err != nil {
-		return stdout.Bytes(), stderr.Bytes(), -1, err
-	}
-	return stdout.Bytes(), stderr.Bytes(), 0, nil
 }

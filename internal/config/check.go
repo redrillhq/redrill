@@ -5,6 +5,8 @@ package config
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -41,85 +43,124 @@ const (
 	checkExec             = "exec"
 )
 
-var l2Checks = map[string]bool{
-	checkPathExists: true, checkPathAbsent: true, checkHashMatch: true,
-	checkNewestFileMaxAge: true, checkFileCountTol: true, checkCanaryFile: true,
-	checkMinTotalBytes: true,
+// checkSpec is one row of the check-kind catalog: where the kind may appear
+// and how its single-key payload decodes and validates. This table is the
+// config half of the check-kind registry; the builder half lives in
+// internal/exec, and a registry test there pins the two to each other, so a
+// kind that validates but cannot be built (the M16-review false-pass class)
+// fails CI instead of drifting.
+type checkSpec struct {
+	levels        map[string]bool
+	unimplemented bool // in the DESIGN §7 catalog, not built yet
+	decode        func(*Check, *yaml.Node) error
+	validate      func(*Check, string, string, *errset) // (path, srcType)
 }
 
-var l3Checks = map[string]bool{checkSQL: true, checkSQLNoError: true}
+var checkCatalog = map[string]checkSpec{
+	checkPathExists: {levels: lvl("l2"), decode: decodePath, validate: needPath},
+	checkPathAbsent: {levels: lvl("l2"), decode: decodePath, validate: needPath},
+	checkCanaryFile: {levels: lvl("l2"), decode: decodePath, validate: needPath},
+	checkHashMatch: {levels: lvl("l2"),
+		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.HashMatch) },
+		validate: func(_ *Check, path, srcType string, es *errset) {
+			// A dumpdir restore is a plain copy: nothing verifies restored bytes.
+			if srcType == "dumpdir" {
+				es.add(path, "hash_match is not valid for a dumpdir source (nothing verifies restored bytes)")
+			}
+		}},
+	checkNewestFileMaxAge: {levels: lvl("l2"),
+		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.NewestFileMaxAge) }},
+	checkFileCountTol: {levels: lvl("l2"),
+		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.FileCountTolerancePct) }},
+	checkMinTotalBytes: {levels: lvl("l2"),
+		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.MinTotalBytes) }},
+	checkSQL: {levels: lvl("l3"),
+		decode: func(c *Check, n *yaml.Node) error {
+			var q SQLCheck
+			err := n.Decode(&q)
+			if err == nil {
+				err = knownKeys(n, "query", "expect")
+			}
+			c.SQL = &q
+			return err
+		},
+		validate: func(c *Check, path, _ string, es *errset) {
+			if c.SQL == nil || c.SQL.Query == "" {
+				es.add(path, "sql requires a query")
+			}
+			if c.SQL != nil && c.SQL.Expect == "" {
+				es.add(path, "sql requires an expect predicate")
+			}
+		}},
+	checkSQLNoError: {levels: lvl("l3"),
+		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.SQLNoError) },
+		validate: func(c *Check, path, _ string, es *errset) {
+			if c.SQLNoError == "" {
+				es.add(path, "sql_no_error requires a query")
+			}
+		}},
+	// exec is in the DESIGN §7 catalog but unimplemented; accepting it would
+	// silently run zero assertions (a level could pass while checking nothing).
+	checkExec: {levels: lvl("l2", "l3"), unimplemented: true,
+		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.Exec) }},
+}
+
+func lvl(levels ...string) map[string]bool {
+	m := make(map[string]bool, len(levels))
+	for _, l := range levels {
+		m[l] = true
+	}
+	return m
+}
+
+func decodePath(c *Check, n *yaml.Node) error { return n.Decode(&c.Path) }
+
+func needPath(c *Check, path, _ string, es *errset) {
+	if c.Path == "" {
+		es.add(path, "%s requires a path", c.Kind)
+	}
+}
+
+// CheckKinds returns the implemented check kinds valid at level, sorted. The
+// exec builder registries are pinned to this in a cross-package test.
+func CheckKinds(level string) []string {
+	var out []string
+	for kind, spec := range checkCatalog {
+		if !spec.unimplemented && spec.levels[level] {
+			out = append(out, kind)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
 
 func (c *Check) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind != yaml.MappingNode || len(n.Content) != 2 {
 		return fmt.Errorf(`each check must be a single-key mapping like {path_exists: "data/"}`)
 	}
 	key := n.Content[0].Value
-	val := n.Content[1]
-	c.Kind = key
-	var err error
-	switch key {
-	case checkPathExists, checkPathAbsent, checkCanaryFile:
-		err = val.Decode(&c.Path)
-	case checkHashMatch:
-		err = val.Decode(&c.HashMatch)
-	case checkNewestFileMaxAge:
-		err = val.Decode(&c.NewestFileMaxAge)
-	case checkFileCountTol:
-		err = val.Decode(&c.FileCountTolerancePct)
-	case checkMinTotalBytes:
-		err = val.Decode(&c.MinTotalBytes)
-	case checkSQL:
-		var q SQLCheck
-		if err = val.Decode(&q); err == nil {
-			err = knownKeys(val, "query", "expect")
-		}
-		c.SQL = &q
-	case checkSQLNoError:
-		err = val.Decode(&c.SQLNoError)
-	case checkExec:
-		err = val.Decode(&c.Exec)
-	default:
+	spec, ok := checkCatalog[key]
+	if !ok {
 		return fmt.Errorf("unknown check kind %q", key)
 	}
-	if err != nil {
+	c.Kind = key
+	if err := spec.decode(c, n.Content[1]); err != nil {
 		return fmt.Errorf("check %q: %w", key, err)
 	}
 	return nil
 }
 
-func (c *Check) validate(path, level string, es *errset) {
-	// exec is in the DESIGN §7 catalog but unimplemented; accepting it would
-	// silently run zero assertions (a level could pass while checking nothing).
-	if c.Kind == checkExec {
-		es.add(path, "the exec check is not implemented yet")
+func (c *Check) validate(path, level, srcType string, es *errset) {
+	spec := checkCatalog[c.Kind] // decode guarantees the kind is cataloged
+	if spec.unimplemented {
+		es.add(path, "the %s check is not implemented yet", c.Kind)
 		return
 	}
-	switch level {
-	case "l2":
-		if !l2Checks[c.Kind] {
-			es.add(path, "check %q is not valid at L2", c.Kind)
-		}
-	case "l3":
-		if !l3Checks[c.Kind] {
-			es.add(path, "check %q is not valid at L3", c.Kind)
-		}
+	if !spec.levels[level] {
+		es.add(path, "check %q is not valid at %s", c.Kind, strings.ToUpper(level))
 	}
-	switch c.Kind {
-	case checkPathExists, checkPathAbsent, checkCanaryFile:
-		if c.Path == "" {
-			es.add(path, "%s requires a path", c.Kind)
-		}
-	case checkSQL:
-		if c.SQL == nil || c.SQL.Query == "" {
-			es.add(path, "sql requires a query")
-		}
-		if c.SQL != nil && c.SQL.Expect == "" {
-			es.add(path, "sql requires an expect predicate")
-		}
-	case checkSQLNoError:
-		if c.SQLNoError == "" {
-			es.add(path, "sql_no_error requires a query")
-		}
+	if spec.validate != nil {
+		spec.validate(c, path, srcType, es)
 	}
 }
 

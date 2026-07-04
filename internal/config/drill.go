@@ -146,11 +146,7 @@ func (l *L2) validate(path, srcType string, es *errset) {
 		es.add(path+".restore", "a sample-scope restore requires sample or include_paths (use scope: full to restore everything)")
 	}
 	for i := range l.Checks {
-		// A dumpdir restore is a plain copy: nothing verifies restored bytes.
-		if l.Checks[i].Kind == checkHashMatch && srcType == "dumpdir" {
-			es.add(checkPath(path, i), "hash_match is not valid for a dumpdir source (nothing verifies restored bytes)")
-		}
-		l.Checks[i].validate(checkPath(path, i), "l2", es)
+		l.Checks[i].validate(checkPath(path, i), "l2", srcType, es)
 	}
 }
 
@@ -175,7 +171,7 @@ func (l *L3) validate(path, srcType string, es *errset) {
 		es.add(path+".checks", "at least one check is required (an L3 with no checks proves nothing)")
 	}
 	for i := range l.Checks {
-		l.Checks[i].validate(checkPath(path, i), "l3", es)
+		l.Checks[i].validate(checkPath(path, i), "l3", srcType, es)
 	}
 }
 

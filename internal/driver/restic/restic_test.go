@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/redrillhq/redrill/internal/driver"
 )
@@ -228,17 +227,6 @@ func TestRepoNeverOnArgv(t *testing.T) {
 				t.Errorf("repo leaked onto argv: %v", call)
 			}
 		}
-	}
-}
-
-// A ctx kill surfaces as the runner's error, never as an engine exit code.
-func TestExecRunnerCtxCancelIsError(t *testing.T) {
-	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	_, _, exit, err := ExecRunner(ctx, "", nil, "sleep", []string{"5"})
-	if err == nil {
-		t.Fatalf("ExecRunner under expired ctx: err = nil (exit %d), want ctx error", exit)
 	}
 }
 

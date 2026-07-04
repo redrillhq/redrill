@@ -10,24 +10,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/redrillhq/redrill/internal/driver"
+	"github.com/redrillhq/redrill/internal/driver/subproc"
 )
 
-// Runner runs a command, returning stdout, stderr, and exit code. err is non-nil
-// only when the process could not start or the context was canceled; a non-zero
-// exit is reported via exitCode, so callers can tell borg's "errors found"
-// (check exit 1) from an operational failure (exit >=2). dir is the working
-// directory (borg extract writes to it).
-type Runner func(ctx context.Context, dir string, env []string, name string, args []string) (stdout, stderr []byte, exitCode int, err error)
+// Runner is the shared subprocess runner; borg maps its exit semantics itself
+// where they carry a verdict (borg check: 1 = errors found, >=2 = operational).
+type Runner = subproc.Runner
 
 type Driver struct {
 	repo         string
@@ -78,7 +71,7 @@ func WithRunner(r Runner) Option {
 var _ driver.SourceDriver = (*Driver)(nil)
 
 func New(repo string, opts ...Option) *Driver {
-	d := &Driver{repo: repo, binary: "borg", run: ExecRunner}
+	d := &Driver{repo: repo, binary: "borg", run: subproc.ExecRunner}
 	for _, o := range opts {
 		o(d)
 	}
@@ -93,36 +86,29 @@ func (d *Driver) Capabilities() driver.Capabilities {
 
 // env returns the inherited environment plus secret refs; never appears on argv.
 func (d *Driver) env() []string {
-	env := os.Environ()
+	var extra []string
 	if d.passphrase != "" {
-		env = append(env, "BORG_PASSPHRASE="+d.passphrase)
+		extra = append(extra, "BORG_PASSPHRASE="+d.passphrase)
 	}
 	if d.sshKey != "" {
-		env = append(env, "BORG_RSH=ssh -i "+d.sshKey+" -o BatchMode=yes")
+		extra = append(extra, "BORG_RSH=ssh -i "+d.sshKey+" -o BatchMode=yes")
 	}
-	return env
+	return subproc.Env(extra...)
 }
 
 func (d *Driver) Validate(ctx context.Context) error {
-	_, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, []string{"list", "--short", d.repo})
-	if err != nil {
-		return fmt.Errorf("borg list %s: %w", d.repo, err)
-	}
-	if exit != 0 {
-		return fmt.Errorf("borg list %s: exit %d: %s", d.repo, exit, oneLine(stderr))
-	}
-	return nil
+	_, err := subproc.Output(ctx, d.run, "", d.env(), d.binary,
+		[]string{"list", "--short", d.repo}, "borg list "+d.repo)
+	return err
 }
 
 // ListSnapshots returns the repo's archives, newest first. borg 1.x records no
 // zone, so timestamps are read as naive local time.
 func (d *Driver) ListSnapshots(ctx context.Context) ([]driver.Snapshot, error) {
-	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, []string{"list", "--json", d.repo})
+	stdout, err := subproc.Output(ctx, d.run, "", d.env(), d.binary,
+		[]string{"list", "--json", d.repo}, "borg list "+d.repo)
 	if err != nil {
-		return nil, fmt.Errorf("borg list %s: %w", d.repo, err)
-	}
-	if exit != 0 {
-		return nil, fmt.Errorf("borg list %s: exit %d: %s", d.repo, exit, oneLine(stderr))
+		return nil, err
 	}
 	return parseList(stdout)
 }
@@ -138,9 +124,9 @@ func (d *Driver) NativeCheck(ctx context.Context, _ driver.NativeCheckOpts) (dri
 	case 0:
 		return driver.Report{OK: true, Summary: "borg check passed"}, nil
 	case 1:
-		return driver.Report{OK: false, Summary: oneLine(stderr)}, nil
+		return driver.Report{OK: false, Summary: subproc.OneLine(stderr)}, nil
 	default:
-		return driver.Report{}, fmt.Errorf("borg check %s: exit %d: %s", d.repo, exit, oneLine(stderr))
+		return driver.Report{}, fmt.Errorf("borg check %s: exit %d: %s", d.repo, exit, subproc.OneLine(stderr))
 	}
 }
 
@@ -158,35 +144,29 @@ func (d *Driver) Restore(ctx context.Context, sel driver.Selection, targetDir st
 		args = append(args, "--")
 		args = append(args, sel.Paths...)
 	}
-	_, stderr, exit, err := d.run(ctx, targetDir, d.env(), d.binary, args)
-	if err != nil {
-		return driver.RestoreReport{}, fmt.Errorf("borg extract %s: %w", d.repo, err)
+	if _, err := subproc.Output(ctx, d.run, targetDir, d.env(), d.binary, args, "borg extract "+d.repo); err != nil {
+		return driver.RestoreReport{}, err
 	}
-	if exit != 0 {
-		return driver.RestoreReport{}, fmt.Errorf("borg extract %s: exit %d: %s", d.repo, exit, oneLine(stderr))
-	}
-	return dirReport(targetDir)
+	return subproc.DirReport(targetDir)
 }
 
 func (d *Driver) ListFiles(ctx context.Context, archive string) ([]driver.FileEntry, error) {
-	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, []string{"list", "--json-lines", d.repo + "::" + archive})
+	ref := d.repo + "::" + archive
+	stdout, err := subproc.Output(ctx, d.run, "", d.env(), d.binary,
+		[]string{"list", "--json-lines", ref}, "borg list "+ref)
 	if err != nil {
-		return nil, fmt.Errorf("borg list %s::%s: %w", d.repo, archive, err)
-	}
-	if exit != 0 {
-		return nil, fmt.Errorf("borg list %s::%s: exit %d: %s", d.repo, archive, exit, oneLine(stderr))
+		return nil, err
 	}
 	return parseFiles(stdout)
 }
 
 // ArchiveSize returns an archive's original (uncompressed) size.
 func (d *Driver) ArchiveSize(ctx context.Context, id string) (int64, error) {
-	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, []string{"info", "--json", d.repo + "::" + id})
+	ref := d.repo + "::" + id
+	stdout, err := subproc.Output(ctx, d.run, "", d.env(), d.binary,
+		[]string{"info", "--json", ref}, "borg info "+ref)
 	if err != nil {
-		return 0, fmt.Errorf("borg info %s::%s: %w", d.repo, id, err)
-	}
-	if exit != 0 {
-		return 0, fmt.Errorf("borg info %s::%s: exit %d: %s", d.repo, id, exit, oneLine(stderr))
+		return 0, err
 	}
 	return parseArchiveSize(stdout)
 }
@@ -278,63 +258,4 @@ func parseBorgTime(s string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("unparsable borg time %q", s)
-}
-
-func oneLine(b []byte) string {
-	s := strings.TrimSpace(string(b))
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	return s
-}
-
-func dirReport(dir string) (driver.RestoreReport, error) {
-	var rep driver.RestoreReport
-	err := filepath.WalkDir(dir, func(_ string, e fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if e.IsDir() {
-			return nil
-		}
-		info, err := e.Info()
-		if err != nil {
-			return err
-		}
-		rep.Files++
-		rep.Bytes += info.Size()
-		return nil
-	})
-	if err != nil {
-		return driver.RestoreReport{}, fmt.Errorf("measure restore dir: %w", err)
-	}
-	return rep, nil
-}
-
-// ExecRunner is the default Runner; the exec layer wraps it with nice/ionice when
-// an IO policy is configured.
-func ExecRunner(ctx context.Context, dir string, env []string, name string, args []string) ([]byte, []byte, int, error) {
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: argv is built here, not from user input
-	cmd.Dir = dir
-	cmd.Env = env
-	// SIGTERM first so the engine can release its repo lock; kill after WaitDelay.
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	cmd.WaitDelay = 10 * time.Second
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	// A kill by ctx must surface as the runner's error, never as an engine exit
-	// code (a timed-out check would otherwise read as "backup corrupt").
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return stdout.Bytes(), stderr.Bytes(), -1, ctxErr
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return stdout.Bytes(), stderr.Bytes(), exitErr.ExitCode(), nil
-	}
-	if err != nil {
-		return stdout.Bytes(), stderr.Bytes(), -1, err
-	}
-	return stdout.Bytes(), stderr.Bytes(), 0, nil
 }

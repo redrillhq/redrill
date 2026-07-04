@@ -45,6 +45,29 @@ func (s *Store) GetProof(ctx context.Context, drill, level string) (time.Time, b
 	return timeFromUnixNano(n), true, nil
 }
 
+// ProofDrills returns every drill name holding a proof, sorted. Serve startup
+// diffs it against the config to flag proofs orphaned by a drill rename.
+func (s *Store) ProofDrills(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT drill FROM drill_state ORDER BY drill`)
+	if err != nil {
+		return nil, fmt.Errorf("list proof drills: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, fmt.Errorf("list proof drills: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list proof drills: %w", err)
+	}
+	return out, nil
+}
+
 // ListProofs is ordered by level.
 func (s *Store) ListProofs(ctx context.Context, drill string) ([]DrillState, error) {
 	rows, err := s.db.QueryContext(ctx,

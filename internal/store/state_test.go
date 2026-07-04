@@ -142,3 +142,28 @@ func TestRecordProofValidation(t *testing.T) {
 		})
 	}
 }
+
+// ProofDrills is the distinct, sorted set of proof-holding drills.
+func TestProofDrills(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newStore(t)
+
+	if got, err := s.ProofDrills(ctx); err != nil || got != nil {
+		t.Fatalf("empty store: got %v, %v", got, err)
+	}
+	for _, p := range []struct{ drill, level string }{
+		{"zeta", "l1"}, {"alpha", "l1"}, {"alpha", "l2"},
+	} {
+		if err := s.RecordProof(ctx, p.drill, p.level, epoch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.ProofDrills(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "alpha" || got[1] != "zeta" {
+		t.Errorf("got %v, want [alpha zeta] (distinct, sorted)", got)
+	}
+}

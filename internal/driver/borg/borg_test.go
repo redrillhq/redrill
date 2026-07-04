@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/redrillhq/redrill/internal/driver"
 )
@@ -249,17 +248,5 @@ func TestCapabilities(t *testing.T) {
 	c := d.Capabilities()
 	if !c.NativeCheck || !c.ListSnapshots || !c.PartialRestore {
 		t.Errorf("caps = %+v", c)
-	}
-}
-
-// A ctx kill surfaces as the runner's error, never as an engine exit code (a
-// timed-out borg check would otherwise read as "repo corrupt").
-func TestExecRunnerCtxCancelIsError(t *testing.T) {
-	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	_, _, exit, err := ExecRunner(ctx, "", nil, "sleep", []string{"5"})
-	if err == nil {
-		t.Fatalf("ExecRunner under expired ctx: err = nil (exit %d), want ctx error", exit)
 	}
 }

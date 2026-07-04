@@ -43,19 +43,18 @@ func (e *LocalExecutor) runDumpdirL3(ctx context.Context, step StepSpec) (StepRe
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	snaps, err := d.ListSnapshots(ctx)
-	if err != nil {
-		return errorStep(res, err.Error()), nil
+	id, msg := resolveSnapshot(ctx, step, d.ListSnapshots,
+		fmt.Sprintf("no files match %q in %s", step.Source.Pattern, step.Source.Path))
+	if msg != "" {
+		return errorStep(res, msg), nil
 	}
-	if len(snaps) == 0 {
-		return errorStep(res, fmt.Sprintf("no files match %q in %s", step.Source.Pattern, step.Source.Path)), nil
-	}
+	res.Snapshot = id
 	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
 	if err != nil {
 		return errorStep(res, err.Error()), nil
 	}
 	defer sc.cleanup()
-	return e.loadAndCheck(ctx, step, sc, d.Path(snaps[0].ID), red)
+	return e.loadAndCheck(ctx, step, sc, d.Path(id), red, id)
 }
 
 func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResult, error) {
@@ -78,12 +77,9 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	snaps, err := d.ListSnapshots(ctx)
-	if err != nil {
-		return errorStep(res, red.Redact(err.Error())), nil
-	}
-	if len(snaps) == 0 {
-		return errorStep(res, "no archives in repository"), nil
+	archive, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no archives in repository")
+	if msg != "" {
+		return errorStep(res, red.Redact(msg)), nil
 	}
 	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
 	if err != nil {
@@ -94,10 +90,10 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 	if err := os.MkdirAll(extractDir, 0o700); err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{snaps[0].ID}, Paths: []string{step.L3.ExtractPath}}, extractDir); err != nil {
+	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{archive}, Paths: []string{step.L3.ExtractPath}}, extractDir); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red)
+	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red, archive)
 }
 
 func (e *LocalExecutor) runResticL3(ctx context.Context, step StepSpec) (StepResult, error) {
@@ -115,12 +111,9 @@ func (e *LocalExecutor) runResticL3(ctx context.Context, step StepSpec) (StepRes
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	snaps, err := d.ListSnapshots(ctx)
-	if err != nil {
-		return errorStep(res, red.Redact(err.Error())), nil
-	}
-	if len(snaps) == 0 {
-		return errorStep(res, "no snapshots in repository"), nil
+	id, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no snapshots in repository")
+	if msg != "" {
+		return errorStep(res, red.Redact(msg)), nil
 	}
 	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
 	if err != nil {
@@ -131,14 +124,14 @@ func (e *LocalExecutor) runResticL3(ctx context.Context, step StepSpec) (StepRes
 	if err := os.MkdirAll(extractDir, 0o700); err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{snaps[0].ID}, Paths: []string{step.L3.ExtractPath}}, extractDir); err != nil {
+	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{id}, Paths: []string{step.L3.ExtractPath}}, extractDir); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red)
+	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red, id)
 }
 
-func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scratch, dumpSrc string, red *redact.Redactor) (StepResult, error) {
-	res := StepResult{Level: step.Level}
+func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scratch, dumpSrc string, red *redact.Redactor, snapshot string) (StepResult, error) {
+	res := StepResult{Level: step.Level, Snapshot: snapshot}
 	l3 := step.L3
 	loaded, format, err := stageDump(dumpSrc, sc.root, sc.maxBytes)
 	if err != nil {
@@ -237,17 +230,27 @@ func sandboxEnv(cfg map[string]string) map[string]string {
 	return env
 }
 
-func buildL3Check(cc config.Check, db string) checks.Check {
-	switch cc.Kind {
-	case "sql":
+// l3Builders is the exec half of the check-kind registry; a registry test
+// pins it to config.CheckKinds("l3") so a kind that validates but cannot be
+// built fails CI instead of silently vanishing.
+var l3Builders = map[string]func(config.Check, string) checks.Check{
+	"sql": func(cc config.Check, db string) checks.Check {
 		if cc.SQL == nil {
 			return nil
 		}
 		return checks.SQL{Query: cc.SQL.Query, Expect: cc.SQL.Expect, DB: db}
-	case "sql_no_error":
+	},
+	"sql_no_error": func(cc config.Check, db string) checks.Check {
 		return checks.SQLNoError{Query: cc.SQLNoError, DB: db}
+	},
+}
+
+func buildL3Check(cc config.Check, db string) checks.Check {
+	b, ok := l3Builders[cc.Kind]
+	if !ok {
+		return nil
 	}
-	return nil
+	return b(cc, db)
 }
 
 // resolveLoader: explicit pg_restore|psql wins; else custom → pg_restore, plain → psql.

@@ -20,6 +20,7 @@ import (
 	"github.com/redrillhq/redrill/internal/driver/borg"
 	"github.com/redrillhq/redrill/internal/driver/dumpdir"
 	"github.com/redrillhq/redrill/internal/driver/restic"
+	"github.com/redrillhq/redrill/internal/driver/subproc"
 	"github.com/redrillhq/redrill/internal/redact"
 	"github.com/redrillhq/redrill/internal/sandbox"
 )
@@ -43,6 +44,13 @@ type StepSpec struct {
 	// run's restored file count (the file_count_tolerance baseline).
 	Scratch       config.Scratch `json:"scratch"`
 	PrevFileCount int            `json:"prev_file_count"`
+
+	// Snapshot pins the level to one snapshot/archive/dump so every level of a
+	// run audits the same backup — a backup landing mid-run must not split the
+	// audit. Empty = resolve newest and report it via StepResult.Snapshot.
+	// A pinned L2/L3 also skips the repo listing (restores are heavy; be
+	// frugal with IO).
+	Snapshot string `json:"snapshot,omitempty"`
 }
 
 type StepResult struct {
@@ -52,6 +60,7 @@ type StepResult struct {
 	Summary  string            `json:"summary"`
 	Files    int               `json:"files"`
 	Bytes    int64             `json:"bytes"`
+	Snapshot string            `json:"snapshot,omitempty"` // the snapshot/dump this level audited
 }
 
 type ExecutorInfo struct {
@@ -89,7 +98,7 @@ func (e *LocalExecutor) WithIOPolicy(p IOPolicy) *LocalExecutor {
 func (e *LocalExecutor) newBorg(src config.Source, passphrase string) *borg.Driver {
 	base := e.borgRunner
 	if base == nil {
-		base = borg.ExecRunner
+		base = subproc.ExecRunner
 	}
 	return borg.New(src.Repo,
 		borg.WithBinary(src.Binary),
@@ -104,7 +113,7 @@ func (e *LocalExecutor) newBorg(src config.Source, passphrase string) *borg.Driv
 func (e *LocalExecutor) newRestic(src config.Source, password string, backendEnv map[string]string) *restic.Driver {
 	base := e.resticRunner
 	if base == nil {
-		base = restic.ExecRunner
+		base = subproc.ExecRunner
 	}
 	return restic.New(src.Repo,
 		restic.WithBinary(src.Binary),
@@ -206,6 +215,7 @@ func runDumpdirL1(ctx context.Context, step StepSpec) (StepResult, error) {
 	if len(snaps) == 0 {
 		return errorStep(res, fmt.Sprintf("no files match %q in %s", step.Source.Pattern, step.Source.Path)), nil
 	}
+	res.Snapshot = snaps[0].ID // pin the rest of the run to the dump audited here
 
 	selected := snaps[:1]
 	if step.Source.Pick == "all-matching-window" {
@@ -321,7 +331,9 @@ func (e *LocalExecutor) runBorgL1(ctx context.Context, step StepSpec) (StepResul
 		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, red))
 	}
 	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
-		res.Evidence = append(res.Evidence, borgArchiveChecks(ctx, d, l1, step.Now, red)...)
+		evs, newest := borgArchiveChecks(ctx, d, l1, step.Now, red)
+		res.Evidence = append(res.Evidence, evs...)
+		res.Snapshot = newest // pin the rest of the run to the archive audited here
 	}
 	if len(res.Evidence) == 0 {
 		return errorStep(res, "no L1 checks produced evidence"), nil
@@ -369,7 +381,9 @@ func (e *LocalExecutor) runResticL1(ctx context.Context, step StepSpec) (StepRes
 		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, red))
 	}
 	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
-		res.Evidence = append(res.Evidence, resticSnapshotChecks(ctx, d, l1, step.Now, red)...)
+		evs, newest := resticSnapshotChecks(ctx, d, l1, step.Now, red)
+		res.Evidence = append(res.Evidence, evs...)
+		res.Snapshot = newest // pin the rest of the run to the snapshot audited here
 	}
 	if len(res.Evidence) == 0 {
 		return errorStep(res, "no L1 checks produced evidence"), nil
@@ -377,6 +391,23 @@ func (e *LocalExecutor) runResticL1(ctx context.Context, step StepSpec) (StepRes
 	res.Status = aggregate(res.Evidence)
 	res.Summary = red.Redact(summarize(res.Status, res.Evidence))
 	return res, nil
+}
+
+// resolveSnapshot returns the snapshot ID a restore level audits: the spec's
+// pin when set (no repo round-trip), else the newest from list. A non-empty
+// errMsg means the level errors (caller redacts it).
+func resolveSnapshot(ctx context.Context, step StepSpec, list func(context.Context) ([]driver.Snapshot, error), noneMsg string) (id, errMsg string) {
+	if step.Snapshot != "" {
+		return step.Snapshot, ""
+	}
+	snaps, err := list(ctx)
+	if err != nil {
+		return "", err.Error()
+	}
+	if len(snaps) == 0 {
+		return "", noneMsg
+	}
+	return snaps[0].ID, ""
 }
 
 // nativeChecker is the slice of a SourceDriver the native-check evidence needs.
@@ -401,20 +432,30 @@ func nativeCheckEvidence(ctx context.Context, d nativeChecker, red *redact.Redac
 	return ev
 }
 
-func borgArchiveChecks(ctx context.Context, d *borg.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) []checks.Evidence {
+// borgArchiveChecks also reports the newest archive ID, the run's pin.
+func borgArchiveChecks(ctx context.Context, d *borg.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) ([]checks.Evidence, string) {
 	snaps, err := d.ListSnapshots(ctx)
 	if err != nil {
-		return listErrorEvidence(l1, red.Redact(err.Error()))
+		return listErrorEvidence(l1, red.Redact(err.Error())), ""
 	}
-	return snapshotAgeAndSize(ctx, snaps, l1, now, red, d.ArchiveSize)
+	var newest string
+	if len(snaps) > 0 {
+		newest = snaps[0].ID
+	}
+	return snapshotAgeAndSize(ctx, snaps, l1, now, red, d.ArchiveSize), newest
 }
 
-func resticSnapshotChecks(ctx context.Context, d *restic.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) []checks.Evidence {
+// resticSnapshotChecks also reports the newest snapshot ID, the run's pin.
+func resticSnapshotChecks(ctx context.Context, d *restic.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) ([]checks.Evidence, string) {
 	snaps, err := d.ListSnapshots(ctx)
 	if err != nil {
-		return listErrorEvidence(l1, red.Redact(err.Error()))
+		return listErrorEvidence(l1, red.Redact(err.Error())), ""
 	}
-	return snapshotAgeAndSize(ctx, snaps, l1, now, red, d.SnapshotSize)
+	var newest string
+	if len(snaps) > 0 {
+		newest = snaps[0].ID
+	}
+	return snapshotAgeAndSize(ctx, snaps, l1, now, red, d.SnapshotSize), newest
 }
 
 // listErrorEvidence attributes a snapshot-listing failure to every configured
@@ -562,14 +603,11 @@ func (e *LocalExecutor) runBorgL2(ctx context.Context, step StepSpec) (StepResul
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	snaps, err := d.ListSnapshots(ctx)
-	if err != nil {
-		return errorStep(res, red.Redact(err.Error())), nil
+	archive, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no archives in repository")
+	if msg != "" {
+		return errorStep(res, red.Redact(msg)), nil
 	}
-	if len(snaps) == 0 {
-		return errorStep(res, "no archives in repository"), nil
-	}
-	archive := snaps[0].ID // newest
+	res.Snapshot = archive
 
 	var paths []string
 	var predicted int64
@@ -610,14 +648,11 @@ func (e *LocalExecutor) runResticL2(ctx context.Context, step StepSpec) (StepRes
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	snaps, err := d.ListSnapshots(ctx)
-	if err != nil {
-		return errorStep(res, red.Redact(err.Error())), nil
+	id, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no snapshots in repository")
+	if msg != "" {
+		return errorStep(res, red.Redact(msg)), nil
 	}
-	if len(snaps) == 0 {
-		return errorStep(res, "no snapshots in repository"), nil
-	}
-	id := snaps[0].ID // newest
+	res.Snapshot = id
 
 	var paths []string
 	var predicted int64
@@ -656,22 +691,33 @@ func runDumpdirL2(ctx context.Context, step StepSpec) (StepResult, error) {
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	snaps, err := d.ListSnapshots(ctx)
-	if err != nil {
-		return errorStep(res, err.Error()), nil
-	}
-	if len(snaps) == 0 {
-		return errorStep(res, fmt.Sprintf("no files match %q in %s", step.Source.Pattern, step.Source.Path)), nil
-	}
-	selected := snaps[:1]
-	if step.Source.Pick == "all-matching-window" {
-		selected = snaps
-	}
 	var ids []string
 	var predicted int64
-	for _, s := range selected {
-		ids = append(ids, s.ID)
-		predicted += s.Size
+	if step.Snapshot != "" && step.Source.Pick != "all-matching-window" {
+		// Pinned: restore exactly the dump the earlier level audited.
+		fi, err := os.Stat(d.Path(step.Snapshot))
+		if err != nil {
+			return errorStep(res, fmt.Sprintf("pinned dump %s: %v", step.Snapshot, err)), nil
+		}
+		ids, predicted = []string{step.Snapshot}, fi.Size()
+		res.Snapshot = step.Snapshot
+	} else {
+		snaps, err := d.ListSnapshots(ctx)
+		if err != nil {
+			return errorStep(res, err.Error()), nil
+		}
+		if len(snaps) == 0 {
+			return errorStep(res, fmt.Sprintf("no files match %q in %s", step.Source.Pattern, step.Source.Path)), nil
+		}
+		res.Snapshot = snaps[0].ID
+		selected := snaps[:1]
+		if step.Source.Pick == "all-matching-window" {
+			selected = snaps
+		}
+		for _, s := range selected {
+			ids = append(ids, s.ID)
+			predicted += s.Size
+		}
 	}
 
 	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
@@ -695,7 +741,7 @@ func finishL2(ctx context.Context, res StepResult, restoreDir string, cfgChecks 
 		if cc.Kind == "hash_match" && !cc.HashMatch {
 			continue // explicitly disabled
 		}
-		c := buildL2Check(cc, count, total, newest, step.PrevFileCount)
+		c := buildL2Check(cc, l2Aggregates{Count: count, Total: total, Newest: newest, Prev: step.PrevFileCount})
 		if c == nil {
 			// A configured check must never vanish silently (it would let the
 			// level pass while checking nothing).
@@ -717,26 +763,41 @@ func finishL2(ctx context.Context, res StepResult, restoreDir string, cfgChecks 
 	return res
 }
 
-func buildL2Check(cc config.Check, count int, total int64, newest time.Time, prev int) checks.Check {
-	switch cc.Kind {
-	case "path_exists":
-		return checks.PathExists{Path: cc.Path}
-	case "path_absent":
-		return checks.PathAbsent{Path: cc.Path}
-	case "canary_file":
-		return checks.CanaryFile{Path: cc.Path}
-	case "hash_match":
-		// No engine exposes a per-file manifest; borg/restic verify hashes on
-		// extract themselves (config rejects hash_match for dumpdir).
-		return checks.HashMatch{}
-	case "newest_file_max_age":
-		return checks.NewestFileMaxAge{Newest: newest, Max: cc.NewestFileMaxAge.Duration()}
-	case "min_total_bytes":
-		return checks.MinTotalBytes{Total: total, Min: cc.MinTotalBytes.Bytes()}
-	case "file_count_tolerance_pct":
-		return checks.FileCountTolerance{Count: count, Prev: prev, Pct: cc.FileCountTolerancePct}
+// l2Aggregates carries the one-walk numbers the L2 builders need.
+type l2Aggregates struct {
+	Count  int
+	Total  int64
+	Newest time.Time
+	Prev   int
+}
+
+// l2Builders is the exec half of the check-kind registry; a registry test
+// pins it to config.CheckKinds("l2") so a kind that validates but cannot be
+// built fails CI instead of silently vanishing.
+var l2Builders = map[string]func(config.Check, l2Aggregates) checks.Check{
+	"path_exists": func(cc config.Check, _ l2Aggregates) checks.Check { return checks.PathExists{Path: cc.Path} },
+	"path_absent": func(cc config.Check, _ l2Aggregates) checks.Check { return checks.PathAbsent{Path: cc.Path} },
+	"canary_file": func(cc config.Check, _ l2Aggregates) checks.Check { return checks.CanaryFile{Path: cc.Path} },
+	// No engine exposes a per-file manifest; borg/restic verify hashes on
+	// extract themselves (config rejects hash_match for dumpdir).
+	"hash_match": func(config.Check, l2Aggregates) checks.Check { return checks.HashMatch{} },
+	"newest_file_max_age": func(cc config.Check, agg l2Aggregates) checks.Check {
+		return checks.NewestFileMaxAge{Newest: agg.Newest, Max: cc.NewestFileMaxAge.Duration()}
+	},
+	"min_total_bytes": func(cc config.Check, agg l2Aggregates) checks.Check {
+		return checks.MinTotalBytes{Total: agg.Total, Min: cc.MinTotalBytes.Bytes()}
+	},
+	"file_count_tolerance_pct": func(cc config.Check, agg l2Aggregates) checks.Check {
+		return checks.FileCountTolerance{Count: agg.Count, Prev: agg.Prev, Pct: cc.FileCountTolerancePct}
+	},
+}
+
+func buildL2Check(cc config.Check, agg l2Aggregates) checks.Check {
+	b, ok := l2Builders[cc.Kind]
+	if !ok {
+		return nil
 	}
-	return nil
+	return b(cc, agg)
 }
 
 func walkAggregates(dir string) (int, int64, time.Time) {

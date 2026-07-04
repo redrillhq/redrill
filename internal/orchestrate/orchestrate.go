@@ -119,9 +119,12 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 		prevFileCount = int(last.FilesRestored)
 	}
 
+	// One snapshot per run: the first level to resolve one pins the rest, so a
+	// backup landing mid-run cannot split the audit across snapshots.
+	pin := ""
 	shortCircuit := false
 	for _, lv := range levels {
-		outcome, ran, err := o.runLevel(ctx, runID, drill, src, lv, start, shortCircuit, opts.Scratch, prevFileCount, &bytesRestored, &filesRestored)
+		outcome, ran, err := o.runLevel(ctx, runID, drill, src, lv, start, shortCircuit, opts.Scratch, prevFileCount, &pin, &bytesRestored, &filesRestored)
 		if err != nil {
 			return RunResult{}, err
 		}
@@ -191,7 +194,7 @@ func (o *Orchestrator) pruneRetention(ctx context.Context, drill config.Drill, n
 }
 
 // ran reports whether the level actually executed (vs. skipped).
-func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.Drill, src config.Source, lv leveled, start time.Time, shortCircuit bool, scratch config.Scratch, prevFileCount int, bytes *int64, files *int) (LevelOutcome, bool, error) {
+func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.Drill, src config.Source, lv leveled, start time.Time, shortCircuit bool, scratch config.Scratch, prevFileCount int, pin *string, bytes *int64, files *int) (LevelOutcome, bool, error) {
 	// start is the run's logical clock (check evaluation, proof time); stepStart
 	// is this level's own start so per-level durations are real.
 	stepStart := o.now().UTC()
@@ -200,7 +203,7 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 		return out, false, o.recordStep(ctx, runID, out, stepStart)
 	}
 
-	res, err := o.exec.RunStep(ctx, o.buildStep(runID, drill, src, lv, start, scratch, prevFileCount))
+	res, err := o.exec.RunStep(ctx, o.buildStep(runID, drill, src, lv, start, scratch, prevFileCount, *pin))
 	switch {
 	case errors.Is(err, exec.ErrUnsupported):
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (unsupported level/source combination)"}
@@ -214,6 +217,9 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 		return out, true, o.recordStep(ctx, runID, out, stepStart)
 	}
 
+	if *pin == "" && res.Snapshot != "" {
+		*pin = res.Snapshot
+	}
 	out := LevelOutcome{Level: lv.name, Status: string(res.Status), Summary: res.Summary, Evidence: res.Evidence}
 	for _, ev := range res.Evidence {
 		row := store.Evidence{
@@ -243,10 +249,10 @@ func (o *Orchestrator) recordStep(ctx context.Context, runID int64, out LevelOut
 	return nil
 }
 
-func (o *Orchestrator) buildStep(runID int64, drill config.Drill, src config.Source, lv leveled, now time.Time, scratch config.Scratch, prevFileCount int) exec.StepSpec {
+func (o *Orchestrator) buildStep(runID int64, drill config.Drill, src config.Source, lv leveled, now time.Time, scratch config.Scratch, prevFileCount int, pin string) exec.StepSpec {
 	spec := exec.StepSpec{
 		RunID: runID, Drill: drill.Name, Level: lv.name, Source: src, Now: now,
-		Scratch: scratch, PrevFileCount: prevFileCount,
+		Scratch: scratch, PrevFileCount: prevFileCount, Snapshot: pin,
 	}
 	switch lv.name {
 	case "l1":

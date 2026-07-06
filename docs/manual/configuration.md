@@ -51,7 +51,7 @@ notify:                          # optional
   urls:                          # list of shoutrrr URLs (ntfy/telegram/discord/email/webhook/…)
     - "ntfy://ntfy.example.com/redrill"
   events: [fail, error, recover, stale]  # default when urls is set; add weekly_digest for the Sunday summary
-  healthchecks_url: ""           # string — http(s) dead-man ping per scheduler cycle
+  healthchecks_url: ""           # string — http(s) dead-man ping, at startup and hourly
 
 sources:                         # list — keys depend on `type`
   - name: nextcloud-borg         # string, required, unique
@@ -171,7 +171,7 @@ fails (secure by default).
 |---|---|---|---|
 | `urls` | list of string | unset | [shoutrrr](https://github.com/nicholas-fedor/shoutrrr) URLs: ntfy, Telegram, Discord, email, webhooks… |
 | `events` | list of string | `fail, error, recover, stale` when `urls` is set | Any subset of `fail`, `error`, `recover`, `stale`, `weekly_digest`. `weekly_digest` (opt-in — not in the default set) is the weekly proof summary: every dataset, proof age, bytes verified. Sent Sundays at 08:00 UTC while the daemon runs; a slot missed during downtime is skipped, never sent late. |
-| `healthchecks_url` | string | unset | Must be an `http(s)` URL; pinged once per scheduler cycle as a dead-man heartbeat. |
+| `healthchecks_url` | string | unset | Must be an `http(s)` URL; pinged at startup and then hourly as a dead-man heartbeat — a fixed cadence independent of drill schedules, so set the monitor's period to ~1 h with a sensible grace. |
 
 > Notifications are emitted by the **daemon** (`redrill serve`). A manual
 > `redrill run` is notification-free — it reports via exit code.

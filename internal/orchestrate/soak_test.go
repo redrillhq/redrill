@@ -5,6 +5,7 @@ package orchestrate
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -100,6 +101,34 @@ func TestRetentionAndWeeklyCadence(t *testing.T) {
 	}
 	if !scheduler.Stale(drill.MaxProofAge.Duration(), at, at.Add(30*24*time.Hour)) {
 		t.Error("should be stale 30 days after the last proof (10d SLA)")
+	}
+
+	// Snapshot pin across scheduled runs: every kept weekly run recorded which
+	// dump it audited (runs.snapshot) with the dump's own timestamp — the
+	// RTO/RPO inputs must survive weeks of runs and retention pruning.
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("fixture dir: %v entries=%d", err, len(entries))
+	}
+	dumpName := entries[0].Name()
+	info, err := entries[0].Info()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range runs {
+		if r.Snapshot != dumpName {
+			t.Errorf("run %d snapshot = %q, want %q", r.ID, r.Snapshot, dumpName)
+		}
+		if !r.SnapshotTime.Equal(info.ModTime().UTC()) {
+			t.Errorf("run %d snapshot_time = %v, want dump mtime %v", r.ID, r.SnapshotTime, info.ModTime().UTC())
+		}
+	}
+	last, ok, err := st.LatestPassingRun(ctx, drill.Name)
+	if err != nil || !ok {
+		t.Fatalf("LatestPassingRun: %v ok=%v", err, ok)
+	}
+	if last.SnapshotTime.IsZero() {
+		t.Error("latest passing run lost its snapshot time (the redrill_rpo_seconds input)")
 	}
 }
 

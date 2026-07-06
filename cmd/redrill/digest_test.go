@@ -65,6 +65,26 @@ func TestWeeklyDigestOncePerSlot(t *testing.T) {
 	})
 }
 
+// Time-compressed digest soak: hourly sweep ticks across eight weeks fire
+// exactly eight digests — one per Sunday slot, no duplicates, no drift.
+func TestWeeklyDigestSoak(t *testing.T) {
+	t.Parallel()
+	_, dataDir := setupStatusConfig(t)
+	withStore(t, dataDir, func(st *store.Store) {
+		cur := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC) // Thursday
+		al, cs := newDigestAlerter(st, []config.Drill{l1Drill("app-db", 10*24*time.Hour)}, &cur)
+
+		end := cur.Add(8 * 7 * 24 * time.Hour)
+		for cur.Before(end) {
+			cur = cur.Add(time.Hour) // the alerter's sweep cadence
+			al.maybeDigest(context.Background())
+		}
+		if got := len(cs.all()); got != 8 {
+			t.Fatalf("digests over 8 weeks = %d, want exactly 8", got)
+		}
+	})
+}
+
 // A daemon started after the slot does not send a catch-up digest — a restart
 // can never duplicate one.
 func TestWeeklyDigestNoStartupCatchUp(t *testing.T) {

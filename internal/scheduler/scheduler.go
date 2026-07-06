@@ -91,21 +91,16 @@ type Options struct {
 	// out-of-band triggers (the API's Run now) share the same gate, so a manual
 	// run and a scheduled run never overlap.
 	Gate *Gate
-	// OnCycle, when set, runs once per scheduler loop iteration after due jobs
-	// are dispatched — the seam for the healthchecks dead-man ping. It must not
-	// block (the cmd wiring fires the ping asynchronously).
-	OnCycle func()
 }
 
 type Scheduler struct {
-	clock   Clock
-	run     RunFunc
-	log     *slog.Logger
-	rng     func() float64
-	gate    *Gate
-	onCycle func()
-	jobs    []*job
-	wg      sync.WaitGroup // in-flight runs, for graceful shutdown
+	clock Clock
+	run   RunFunc
+	log   *slog.Logger
+	rng   func() float64
+	gate  *Gate
+	jobs  []*job
+	wg    sync.WaitGroup // in-flight runs, for graceful shutdown
 }
 
 // New parses each schedule up front; an invalid schedule is a configuration error.
@@ -127,12 +122,11 @@ func New(drills []config.Drill, run RunFunc, opts Options) (*Scheduler, error) {
 		gate = NewGate(opts.Concurrency)
 	}
 	s := &Scheduler{
-		clock:   opts.Clock,
-		run:     run,
-		log:     opts.Logger,
-		rng:     opts.Rng,
-		gate:    gate,
-		onCycle: opts.OnCycle,
+		clock: opts.Clock,
+		run:   run,
+		log:   opts.Logger,
+		rng:   opts.Rng,
+		gate:  gate,
 	}
 	now := s.clock.Now()
 	for i := range drills {
@@ -161,11 +155,6 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		due, next := s.due(now)
 		for _, j := range due {
 			s.dispatch(ctx, j)
-		}
-		// One heartbeat per cycle: fires at startup and on every wake, so a
-		// dead-man monitor (healthchecks) learns the daemon is alive.
-		if s.onCycle != nil {
-			s.onCycle()
 		}
 
 		var wake <-chan time.Time

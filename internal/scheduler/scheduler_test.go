@@ -236,24 +236,6 @@ func TestGatePerDrill(t *testing.T) {
 	rel3()
 }
 
-func TestOnCycleFires(t *testing.T) {
-	t.Parallel()
-	ticks := make(chan struct{}, 4)
-	s, err := New(nil, nil, Options{Logger: discardLogger(), OnCycle: func() { ticks <- struct{}{} }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = s.Run(ctx) }()
-
-	select {
-	case <-ticks: // the startup cycle fires the heartbeat even with no jobs
-	case <-time.After(2 * time.Second):
-		t.Fatal("OnCycle never fired on the startup cycle")
-	}
-}
-
 func TestRunIdleNoJobs(t *testing.T) {
 	t.Parallel()
 	s, err := New(nil, nil, Options{Logger: discardLogger()})

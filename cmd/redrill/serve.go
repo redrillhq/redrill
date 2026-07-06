@@ -158,14 +158,8 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 		return nil
 	}
 
-	hcURL := cfg.Notify.HealthchecksURL
-	onCycle := func() {
-		if hcURL != "" {
-			go pingHealthchecks(ctx, hcURL, log)
-		}
-	}
 	sched, err := scheduler.New(cfg.Drills, runFunc, scheduler.Options{
-		Concurrency: cfg.Concurrency, Logger: log, Gate: gate, OnCycle: onCycle,
+		Concurrency: cfg.Concurrency, Logger: log, Gate: gate,
 	})
 	if err != nil {
 		log.Error("invalid schedule", "error", err.Error())
@@ -177,11 +171,16 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger) int {
 		return code
 	}
 
-	// The staleness sweeper runs alongside the scheduler; both stop on ctx cancel.
+	// The staleness sweeper and the dead-man heartbeat run alongside the
+	// scheduler; all stop on ctx cancel.
 	var wg sync.WaitGroup
 	if al.active() {
 		wg.Add(1)
 		go func() { defer wg.Done(); al.runSweeps(ctx) }()
+	}
+	if url := cfg.Notify.HealthchecksURL; url != "" {
+		wg.Add(1)
+		go func() { defer wg.Done(); runHeartbeat(ctx, url, log) }()
 	}
 
 	log.Info("redrill serving", "drills", len(cfg.Drills), "concurrency", cfg.Concurrency)
@@ -250,6 +249,27 @@ func orphanedProofs(drills []config.Drill, proofDrills []string) []string {
 		}
 	}
 	return out
+}
+
+// heartbeatInterval is the dead-man cadence: fixed and decoupled from drill
+// schedules — a weekly-only config previously pinged weekly (once per
+// scheduler wake), false-alarming any monitor with a sane grace period. A
+// var so tests can shorten it.
+var heartbeatInterval = time.Hour
+
+// runHeartbeat pings at startup, then on the fixed cadence, until ctx ends.
+func runHeartbeat(ctx context.Context, url string, log *slog.Logger) {
+	pingHealthchecks(ctx, url, log)
+	t := time.NewTicker(heartbeatInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			pingHealthchecks(ctx, url, log)
+		}
+	}
 }
 
 // pingHealthchecks sends a bounded dead-man heartbeat GET; failures are logged,

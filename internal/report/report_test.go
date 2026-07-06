@@ -79,6 +79,7 @@ func seedStore(t *testing.T) *store.Store {
 	mustFinish(t, st, store.Run{
 		ID: id, FinishedAt: passFinish, Result: store.ResultPass, LevelReached: "l3",
 		BytesRestored: 52428800, FilesRestored: 240, DurationMS: 12300,
+		Snapshot: "app-db-2026-07-01.sql.gz",
 	})
 	mustStep(t, st, store.RunStep{RunID: id, Kind: "l1", StartedAt: start, FinishedAt: start.Add(400 * time.Millisecond), Status: "pass", Summary: "3 checks passed"})
 	mustStep(t, st, store.RunStep{RunID: id, Kind: "l3", StartedAt: start.Add(400 * time.Millisecond), FinishedAt: passFinish, Status: "pass", Summary: "sandbox booted, 1 check passed"})
@@ -99,6 +100,7 @@ func seedStore(t *testing.T) *store.Store {
 	}
 	mustFinish(t, st, store.Run{
 		ID: wid, FinishedAt: wStart.Add(700 * time.Millisecond), Result: store.ResultFail, LevelReached: "l1", DurationMS: 700,
+		Snapshot: "wiki-2026-07-04.sql.gz",
 	})
 	mustStep(t, st, store.RunStep{RunID: wid, Kind: "l1", StartedAt: wStart, FinishedAt: wStart.Add(700 * time.Millisecond), Status: "fail", Summary: "file_min_bytes failed"})
 	mustStep(t, st, store.RunStep{RunID: wid, Kind: "l3", StartedAt: wStart.Add(700 * time.Millisecond), Status: "skipped", Summary: "skipped: l1 failed"})
@@ -176,6 +178,9 @@ func TestBuild(t *testing.T) {
 	}
 	if app.LastRun == nil || app.LastRun.Result != "pass" || len(app.LastRun.Evidence) != 4 {
 		t.Fatalf("app-db last run: %+v", app.LastRun)
+	}
+	if app.LastRun.Snapshot != "app-db-2026-07-01.sql.gz" {
+		t.Errorf("app-db snapshot = %q, want the audited dump", app.LastRun.Snapshot)
 	}
 	if got := app.LastRun.Steps[0].DurationMS; got != 400 {
 		t.Errorf("l1 step duration: got %d ms, want 400", got)

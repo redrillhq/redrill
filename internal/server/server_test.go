@@ -66,7 +66,7 @@ func seedFinishedRun(t *testing.T, st *store.Store, drill string, result store.R
 	}
 	if err := st.FinishRun(ctx, store.Run{
 		ID: id, Result: result, LevelReached: "l1", BytesRestored: 1000, FilesRestored: 5,
-		DurationMS: 1500, FinishedAt: at.Add(2 * time.Second),
+		DurationMS: 1500, FinishedAt: at.Add(2 * time.Second), Snapshot: "snap-9",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +206,9 @@ func TestRunDetail(t *testing.T) {
 	got := decode[runDetail](t, rec)
 	if got.ID != id || got.Result != "fail" {
 		t.Errorf("run view mismatch: %+v", got.runView)
+	}
+	if got.Snapshot != "snap-9" {
+		t.Errorf("snapshot = %q, want snap-9 (the audited snapshot rides the API)", got.Snapshot)
 	}
 	if len(got.Steps) != 1 || got.Steps[0].Kind != "l1" {
 		t.Errorf("steps mismatch: %+v", got.Steps)

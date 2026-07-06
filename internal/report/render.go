@@ -32,6 +32,9 @@ func Markdown(r Report) []byte {
 		}
 		run := d.LastRun
 		fmt.Fprintf(&b, "\n### Last run — %s\n\n", runHeadline(run, r.GeneratedAt))
+		if run.Snapshot != "" {
+			fmt.Fprintf(&b, "Audited snapshot: `%s`\n\n", mdEscape(run.Snapshot))
+		}
 		if len(run.Steps) > 0 {
 			b.WriteString("| Level | Status | Duration | Summary |\n|---|---|---|---|\n")
 			for _, s := range run.Steps {
@@ -145,6 +148,7 @@ type htmlDrill struct {
 type htmlRun struct {
 	Headline string
 	Result   string
+	Snapshot string
 	Steps    []htmlStep
 	Evidence []htmlEvidence
 }
@@ -175,7 +179,7 @@ func htmlData(r Report) htmlView {
 			Proven:   provenLine(d, r.GeneratedAt),
 		}
 		if run := d.LastRun; run != nil {
-			hr := htmlRun{Headline: runHeadline(run, r.GeneratedAt), Result: run.Result}
+			hr := htmlRun{Headline: runHeadline(run, r.GeneratedAt), Result: run.Result, Snapshot: run.Snapshot}
 			for _, s := range run.Steps {
 				hr.Steps = append(hr.Steps, htmlStep{
 					Kind: s.Kind, Status: s.Status, Duration: durationMS(s.DurationMS), Summary: s.Summary,
@@ -233,6 +237,8 @@ ul { margin: .25rem 0; padding-left: 1.25rem; }
 </ul>
 {{if .Run}}
 <h3>Last run — <span class="status-{{.Run.Result}}">{{.Run.Headline}}</span></h3>
+{{if .Run.Snapshot}}<p class="muted">Audited snapshot: {{.Run.Snapshot}}</p>
+{{end}}
 {{if .Run.Steps}}
 <table>
 <tr><th>Level</th><th>Status</th><th>Duration</th><th>Summary</th></tr>

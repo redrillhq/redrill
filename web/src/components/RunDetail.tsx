@@ -50,6 +50,7 @@ export function RunDetail({ id }: { id: number }) {
         <Field label="Files restored">{run.files_restored.toLocaleString()}</Field>
         <Field label="Started">{localTime(run.started_at)}</Field>
         <Field label="Finished">{localTime(run.finished_at)}</Field>
+        <Field label="Snapshot">{run.snapshot || '—'}</Field>
       </dl>
 
       <Panel title="Steps">

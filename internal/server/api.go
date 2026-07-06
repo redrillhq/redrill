@@ -110,6 +110,7 @@ type runView struct {
 	DurationMS    int64  `json:"duration_ms"`
 	BytesRestored int64  `json:"bytes_restored"`
 	FilesRestored int64  `json:"files_restored"`
+	Snapshot      string `json:"snapshot,omitempty"` // the snapshot/dump the run audited
 }
 
 func toRunView(r store.Run) runView {
@@ -117,6 +118,7 @@ func toRunView(r store.Run) runView {
 		ID: r.ID, Drill: r.Drill, Result: string(r.Result), Trigger: string(r.Trigger),
 		LevelReached: r.LevelReached, StartedAt: r.StartedAt.Format(time.RFC3339),
 		DurationMS: r.DurationMS, BytesRestored: r.BytesRestored, FilesRestored: r.FilesRestored,
+		Snapshot: r.Snapshot,
 	}
 	if !r.FinishedAt.IsZero() {
 		v.FinishedAt = r.FinishedAt.Format(time.RFC3339)

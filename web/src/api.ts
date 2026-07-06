@@ -33,6 +33,7 @@ export interface RunView {
   duration_ms: number
   bytes_restored: number
   files_restored: number
+  snapshot?: string
 }
 
 export interface StepView {

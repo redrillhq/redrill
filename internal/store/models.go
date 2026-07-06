@@ -35,6 +35,7 @@ type Run struct {
 	FilesRestored int64
 	DurationMS    int64
 	Executor      string
+	Snapshot      string // the snapshot/archive/dump the run audited; "" = none resolved
 }
 
 // Idx is assigned by the store on append.

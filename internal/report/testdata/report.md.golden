@@ -12,6 +12,8 @@ Generated 2026-07-04 09:00 UTC.
 
 ### Last run — PASS (run 1, schedule, 3d ago, 12.3s, 50 MiB / 240 files restored)
 
+Audited snapshot: `app-db-2026-07-01.sql.gz`
+
 | Level | Status | Duration | Summary |
 |---|---|---|---|
 | l1 | PASS | 400ms | 3 checks passed |
@@ -39,6 +41,8 @@ No runs recorded.
 - Proven: l1 20d ago (2026-06-14 09:00 UTC)
 
 ### Last run — FAIL (run 2, schedule, 1h ago, 700ms)
+
+Audited snapshot: `wiki-2026-07-04.sql.gz`
 
 | Level | Status | Duration | Summary |
 |---|---|---|---|

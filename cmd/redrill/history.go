@@ -80,15 +80,15 @@ func printHistory(w io.Writer, name string, runs []store.Run) {
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tRESULT\tLEVEL\tTRIGGER\tSTARTED (UTC)\tDURATION")
+	fmt.Fprintln(tw, "RUN\tRESULT\tLEVEL\tTRIGGER\tSTARTED (UTC)\tDURATION\tSNAPSHOT")
 	for _, r := range runs {
 		result := string(r.Result)
 		if result == "" {
 			result = "running"
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			r.ID, result, dash(r.LevelReached), r.Trigger,
-			r.StartedAt.Format("2006-01-02 15:04"), humanMS(r.DurationMS))
+			r.StartedAt.Format("2006-01-02 15:04"), humanMS(r.DurationMS), dash(r.Snapshot))
 	}
 	_ = tw.Flush()
 }
@@ -108,6 +108,9 @@ func historyJSON(runs []store.Run) []map[string]any {
 		}
 		if !r.FinishedAt.IsZero() {
 			m["finished_at"] = r.FinishedAt.Format(time.RFC3339)
+		}
+		if r.Snapshot != "" {
+			m["snapshot"] = r.Snapshot
 		}
 		out = append(out, m)
 	}

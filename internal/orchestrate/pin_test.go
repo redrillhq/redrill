@@ -63,4 +63,14 @@ func TestRunPinsSnapshotAcrossLevels(t *testing.T) {
 			t.Errorf("step %d pin = %q, want %q (a run must audit one snapshot)", i, pe.pins[i], w)
 		}
 	}
+
+	// The audited snapshot is recorded on the run row, so evidence still names
+	// the backup it tested after the source rotates.
+	run, err := st.GetRun(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Snapshot != "snap-A" {
+		t.Errorf("runs.snapshot = %q, want snap-A", run.Snapshot)
+	}
 }

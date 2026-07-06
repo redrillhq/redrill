@@ -97,6 +97,11 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	// Finalize even on the error path so a mid-run store failure or a canceled
 	// ctx never leaves a zombie run (result NULL). WithoutCancel lets cleanup
 	// persist after a timeout cancellation.
+	// One snapshot per run: the first level to resolve one pins the rest, so a
+	// backup landing mid-run cannot split the audit across snapshots. Recorded
+	// on the run row so evidence still names the backup it tested after the
+	// source rotates.
+	pin := ""
 	finished := false
 	defer func() {
 		if finished {
@@ -106,7 +111,7 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 		_ = o.store.FinishRun(context.WithoutCancel(ctx), store.Run{
 			ID: runID, Result: store.ResultError, LevelReached: result.LevelReached,
 			BytesRestored: bytesRestored, FilesRestored: int64(filesRestored),
-			DurationMS: end.Sub(start).Milliseconds(), FinishedAt: end,
+			DurationMS: end.Sub(start).Milliseconds(), FinishedAt: end, Snapshot: pin,
 		})
 	}()
 
@@ -119,9 +124,6 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 		prevFileCount = int(last.FilesRestored)
 	}
 
-	// One snapshot per run: the first level to resolve one pins the rest, so a
-	// backup landing mid-run cannot split the audit across snapshots.
-	pin := ""
 	shortCircuit := false
 	for _, lv := range levels {
 		outcome, ran, err := o.runLevel(ctx, runID, drill, src, lv, start, shortCircuit, opts.Scratch, prevFileCount, &pin, &bytesRestored, &filesRestored)
@@ -150,6 +152,7 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 		FilesRestored: int64(filesRestored),
 		DurationMS:    end.Sub(start).Milliseconds(),
 		FinishedAt:    end,
+		Snapshot:      pin,
 	}
 	// WithoutCancel so a run whose work completed keeps its real verdict even if
 	// ctx expired at the wire; the defer above is only the abnormal-path backstop.

@@ -35,7 +35,7 @@ func TestRunLifecycle(t *testing.T) {
 	}
 
 	fin := epoch.Add(90 * time.Second)
-	err = s.FinishRun(ctx, Run{ID: id, Result: ResultPass, LevelReached: "l2", BytesRestored: 4096, DurationMS: 90000, FinishedAt: fin})
+	err = s.FinishRun(ctx, Run{ID: id, Result: ResultPass, LevelReached: "l2", BytesRestored: 4096, DurationMS: 90000, FinishedAt: fin, Snapshot: "arch-7"})
 	if err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
@@ -45,6 +45,9 @@ func TestRunLifecycle(t *testing.T) {
 	}
 	if got.Result != ResultPass || got.LevelReached != "l2" || got.BytesRestored != 4096 || got.DurationMS != 90000 {
 		t.Errorf("finished run mismatch: %+v", got)
+	}
+	if got.Snapshot != "arch-7" {
+		t.Errorf("snapshot = %q, want arch-7 (the audited snapshot must persist)", got.Snapshot)
 	}
 	if !got.FinishedAt.Equal(fin) || got.FinishedAt.Location() != time.UTC {
 		t.Errorf("finished_at = %v, want %v UTC", got.FinishedAt, fin)

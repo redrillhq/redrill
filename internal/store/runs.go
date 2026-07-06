@@ -14,7 +14,7 @@ import (
 // scanner is the common surface of *sql.Row and *sql.Rows.
 type scanner interface{ Scan(dest ...any) error }
 
-const runColumns = `id, drill, "trigger", started_at, finished_at, result, level_reached, bytes_restored, files_restored, duration_ms, executor`
+const runColumns = `id, drill, "trigger", started_at, finished_at, result, level_reached, bytes_restored, files_restored, duration_ms, executor, snapshot`
 
 const (
 	runByID       = `SELECT ` + runColumns + ` FROM runs WHERE id = ?`
@@ -60,9 +60,9 @@ func (s *Store) FinishRun(ctx context.Context, r Run) error {
 		return fmt.Errorf("finish run: id required")
 	}
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE runs SET finished_at = ?, result = ?, level_reached = ?, bytes_restored = ?, files_restored = ?, duration_ms = ?
+		UPDATE runs SET finished_at = ?, result = ?, level_reached = ?, bytes_restored = ?, files_restored = ?, duration_ms = ?, snapshot = ?
 		WHERE id = ? AND result IS NULL`,
-		nullTime(r.FinishedAt), nullResult(r.Result), r.LevelReached, r.BytesRestored, r.FilesRestored, r.DurationMS, r.ID)
+		nullTime(r.FinishedAt), nullResult(r.Result), r.LevelReached, r.BytesRestored, r.FilesRestored, r.DurationMS, r.Snapshot, r.ID)
 	if err != nil {
 		return fmt.Errorf("finish run %d: %w", r.ID, err)
 	}
@@ -205,7 +205,7 @@ func scanRun(sc scanner) (Run, error) {
 		result   sql.NullString
 	)
 	if err := sc.Scan(&r.ID, &r.Drill, &trigger, &started, &finished, &result,
-		&r.LevelReached, &r.BytesRestored, &r.FilesRestored, &r.DurationMS, &r.Executor); err != nil {
+		&r.LevelReached, &r.BytesRestored, &r.FilesRestored, &r.DurationMS, &r.Executor, &r.Snapshot); err != nil {
 		return Run{}, err
 	}
 	r.Trigger = Trigger(trigger)

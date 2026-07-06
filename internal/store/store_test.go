@@ -30,17 +30,16 @@ func TestLoadMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadMigrations: %v", err)
 	}
-	if len(ms) != 3 {
-		t.Fatalf("migrations = %d, want 3", len(ms))
+	if len(ms) != 4 {
+		t.Fatalf("migrations = %d, want 4", len(ms))
 	}
 	if ms[0].version != 1 || ms[0].name != "0001_init.sql" {
 		t.Errorf("migration[0] = {%d, %q}, want {1, 0001_init.sql}", ms[0].version, ms[0].name)
 	}
-	if ms[1].version != 2 {
-		t.Errorf("migration[1] version = %d, want 2", ms[1].version)
-	}
-	if ms[2].version != 3 {
-		t.Errorf("migration[2] version = %d, want 3", ms[2].version)
+	for i, want := range []int{1, 2, 3, 4} {
+		if ms[i].version != want {
+			t.Errorf("migration[%d] version = %d, want %d", i, ms[i].version, want)
+		}
 	}
 }
 
@@ -53,8 +52,8 @@ func TestOpenMigratesFromEmpty(t *testing.T) {
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != 3 {
-		t.Errorf("schema version = %d, want 3", version)
+	if version != 4 {
+		t.Errorf("schema version = %d, want 4", version)
 	}
 
 	want := map[string]bool{

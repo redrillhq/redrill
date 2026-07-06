@@ -791,6 +791,12 @@ var l2Builders = map[string]func(config.Check, l2Aggregates) checks.Check{
 		return checks.FileCountTolerance{Count: agg.Count, Prev: agg.Prev, Pct: cc.FileCountTolerancePct}
 	},
 	"exec": func(cc config.Check, _ l2Aggregates) checks.Check { return checks.ExecScript{Command: cc.Exec} },
+	"file_count": func(cc config.Check, _ l2Aggregates) checks.Check {
+		if cc.FileCount == nil {
+			return nil
+		}
+		return checks.FileCount{Glob: cc.FileCount.Glob, MinSize: cc.FileCount.MinSize.Bytes(), Expect: cc.FileCount.Expect}
+	},
 }
 
 func buildL2Check(cc config.Check, agg l2Aggregates) checks.Check {

@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -23,11 +24,20 @@ type Check struct {
 	SQL                   *SQLCheck
 	SQLNoError            string
 	Exec                  string
+	FileCount             *FileCountCheck
 }
 
 type SQLCheck struct {
 	Query  string `yaml:"query"`
 	Expect string `yaml:"expect"`
+}
+
+// FileCountCheck asserts how many restored files match a glob (each at least
+// min_size bytes): {glob: "**/*.jpg", min_size: 1, expect: "> 50"}.
+type FileCountCheck struct {
+	Glob    string `yaml:"glob"`
+	MinSize Size   `yaml:"min_size"`
+	Expect  string `yaml:"expect"`
 }
 
 const (
@@ -41,6 +51,7 @@ const (
 	checkSQL              = "sql"
 	checkSQLNoError       = "sql_no_error"
 	checkExec             = "exec"
+	checkFileCount        = "file_count"
 )
 
 // checkSpec is one row of the check-kind catalog: where the kind may appear
@@ -75,6 +86,27 @@ var checkCatalog = map[string]checkSpec{
 		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.FileCountTolerancePct) }},
 	checkMinTotalBytes: {levels: lvl("l2"),
 		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.MinTotalBytes) }},
+	checkFileCount: {levels: lvl("l2"),
+		decode: func(c *Check, n *yaml.Node) error {
+			var fc FileCountCheck
+			err := n.Decode(&fc)
+			if err == nil {
+				err = knownKeys(n, "glob", "min_size", "expect")
+			}
+			c.FileCount = &fc
+			return err
+		},
+		validate: func(c *Check, path, _, _ string, es *errset) {
+			fc := c.FileCount
+			if fc == nil || fc.Glob == "" {
+				es.add(path, "file_count requires a glob")
+			} else if !validGlob(fc.Glob) {
+				es.add(path, "file_count glob %q is not a valid pattern", fc.Glob)
+			}
+			if fc != nil && fc.Expect == "" {
+				es.add(path, "file_count requires an expect predicate")
+			}
+		}},
 	checkSQL: {levels: lvl("l3"),
 		decode: func(c *Check, n *yaml.Node) error {
 			var q SQLCheck
@@ -120,6 +152,21 @@ func lvl(levels ...string) map[string]bool {
 }
 
 func decodePath(c *Check, n *yaml.Node) error { return n.Decode(&c.Path) }
+
+// validGlob is the validate-time syntax check for file_count patterns, so a
+// malformed glob is exit 3, not a run-time check error. "**" segments are
+// depth wildcards; each remaining segment must be path.Match-parsable.
+func validGlob(pattern string) bool {
+	for _, seg := range strings.Split(pattern, "/") {
+		if seg == "**" {
+			continue
+		}
+		if _, err := path.Match(seg, "probe"); err != nil {
+			return false
+		}
+	}
+	return true
+}
 
 func needPath(c *Check, path, _, _ string, es *errset) {
 	if c.Path == "" {

@@ -488,6 +488,7 @@ func generateConfig(o genOptions) ([]byte, error) {
 		b.WriteString("          - min_total_bytes: 1MiB\n")
 		b.WriteString("          - newest_file_max_age: 8d\n")
 		b.WriteString("          # - path_exists: \"a/known/path\" # assert a known file restored\n")
+		b.WriteString("          # - file_count: { glob: \"**/*.jpg\", min_size: 1, expect: \"> 50\" } # assert content, not just bytes\n")
 	}
 	if o.L3 {
 		b.WriteString("      l3:\n")

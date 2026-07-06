@@ -232,6 +232,30 @@ var contractCases = []contractCase{
 	{kind: kindExec, name: "sandbox-transport/error", want: Error, build: func(_ *testing.T) (Check, CheckEnv) {
 		return ExecSandbox{Command: "verify_rows"}, CheckEnv{Sandbox: fakeSandbox{err: errExecTransport}, Now: now}
 	}},
+
+	// --- file_count: the content-shaped L2 assertion ---
+	{kind: kindFileCount, name: "too-few-matches/fail", want: Fail, actualHas: "2", build: func(t *testing.T) (Check, CheckEnv) {
+		return FileCount{Glob: "*.jpg", MinSize: 1, Expect: "> 50"}, CheckEnv{RestoreDir: jpegTree(t, 2, 0), Now: now}
+	}},
+	{kind: kindFileCount, name: "exactly-at-boundary/pass", want: Pass, build: func(t *testing.T) (Check, CheckEnv) {
+		return FileCount{Glob: "*.jpg", MinSize: 1, Expect: ">= 3"}, CheckEnv{RestoreDir: jpegTree(t, 3, 0), Now: now}
+	}},
+	{kind: kindFileCount, name: "right-names-empty-bytes/fail", want: Fail, actualHas: "1", build: func(t *testing.T) (Check, CheckEnv) {
+		// The dead-export class: the file names restored, the bytes did not.
+		return FileCount{Glob: "*.jpg", MinSize: 1, Expect: ">= 3"}, CheckEnv{RestoreDir: jpegTree(t, 1, 2), Now: now}
+	}},
+	{kind: kindFileCount, name: "nested-basename-match/pass", want: Pass, build: func(t *testing.T) (Check, CheckEnv) {
+		dir := t.TempDir()
+		writeDeep(t, filepath.Join(dir, "photos", "2026", "a.jpg"), "bytes")
+		writeDeep(t, filepath.Join(dir, "photos", "b.jpg"), "bytes")
+		return FileCount{Glob: "*.jpg", MinSize: 1, Expect: "== 2"}, CheckEnv{RestoreDir: dir, Now: now}
+	}},
+	{kind: kindFileCount, name: "invalid-expect/error", want: Error, build: func(t *testing.T) (Check, CheckEnv) {
+		return FileCount{Glob: "*.jpg", Expect: "fifty"}, CheckEnv{RestoreDir: t.TempDir(), Now: now}
+	}},
+	{kind: kindFileCount, name: "unreadable-restore/error", want: Error, build: func(t *testing.T) (Check, CheckEnv) {
+		return FileCount{Glob: "*.jpg", Expect: "> 0"}, CheckEnv{RestoreDir: filepath.Join(t.TempDir(), "gone"), Now: now}
+	}},
 }
 
 var errExecTransport = errors.New("container gone")
@@ -272,7 +296,7 @@ func TestContractCoversEveryKind(t *testing.T) {
 		kindSnapshotMaxAge, kindSizeAnomaly,
 		kindPathExists, kindPathAbsent, kindCanaryFile, kindHashMatch,
 		kindNewestFileMaxAge, kindMinTotalBytes, kindFileCountTolerance,
-		kindSQL, kindSQLNoError, kindExec,
+		kindSQL, kindSQLNoError, kindExec, kindFileCount,
 	}
 	advisory := map[string]bool{kindSizeAnomaly: true} // always passes; no fail direction
 

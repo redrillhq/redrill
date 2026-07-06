@@ -6,6 +6,9 @@
 package orchestrate
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -92,5 +95,66 @@ func TestExecCheckNearPass(t *testing.T) {
 	res := runDrill(t, st, drill, src, RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
 	if res.Status != store.ResultPass {
 		t.Fatalf("healthy exec drill = %s, want pass; levels = %+v", res.Status, res.Levels)
+	}
+}
+
+// photoDrill is the file_count habitat: a directory of jpegs restored in full
+// (dumpdir all-matching-window), asserted "> 50 non-empty JPEGs".
+func photoDrill(dir string) (config.Drill, config.Source) {
+	src := config.Source{Name: "photos", Type: "dumpdir", Path: dir, Pattern: "*.jpg", Pick: "all-matching-window"}
+	minSize := config.Size(1)
+	levels := config.Levels{L2: &config.L2{
+		Restore: config.Restore{Scope: "full"},
+		Checks: []config.Check{{Kind: "file_count", FileCount: &config.FileCountCheck{
+			Glob: "*.jpg", MinSize: minSize, Expect: "> 50",
+		}}},
+	}}
+	return config.Drill{Name: "photos", Source: "photos", Levels: levels}, src
+}
+
+// writePhotos builds a photo export: filled jpegs plus empty ones — right
+// names, fresh mtimes, plausible listing.
+func writePhotos(t *testing.T, filled, empty int) string {
+	t.Helper()
+	dir := t.TempDir()
+	for i := 0; i < filled; i++ {
+		writeFile(t, dir, fmt.Sprintf("img-%03d.jpg", i), "jpeg-bytes-jpeg-bytes")
+	}
+	for i := 0; i < empty; i++ {
+		writeFile(t, dir, fmt.Sprintf("img-e%03d.jpg", i), "")
+	}
+	return dir
+}
+
+func writeFile(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// filecount-dead-export: the "perfect cron, dead backup" class for file trees
+// — the export produced the right file names but empty bytes. 60 jpegs
+// restore, only 5 hold data; "> 50 non-empty" must fail (invariant #5: every
+// check kind ships a sabotage fixture).
+func TestSabotageFileCountEmptyExport(t *testing.T) {
+	t.Parallel()
+	dir := writePhotos(t, 5, 55)
+	st := newStore(t)
+	drill, src := photoDrill(dir)
+	res := runDrill(t, st, drill, src, RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
+	mustFail(t, res, "filecount-dead-export")
+	assertCaught(t, res, "file_count")
+}
+
+// The cry-wolf mirror: 60 healthy jpegs pass the same assertion.
+func TestFileCountNearPass(t *testing.T) {
+	t.Parallel()
+	dir := writePhotos(t, 60, 0)
+	st := newStore(t)
+	drill, src := photoDrill(dir)
+	res := runDrill(t, st, drill, src, RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
+	if res.Status != store.ResultPass {
+		t.Fatalf("healthy photo drill = %s, want pass; levels = %+v", res.Status, res.Levels)
 	}
 }

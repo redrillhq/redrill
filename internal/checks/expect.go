@@ -6,6 +6,7 @@ package checks
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,11 +31,13 @@ const (
 )
 
 // Build with ParseExpect. between is inclusive; nonempty treats whitespace-only as empty.
+// Numbers are exact (big.Rat): float64 == would silently collide integer
+// counts above 2^53.
 type Expectation struct {
 	op  expectOp
 	raw string
-	a   float64        // operand for > >= == != , and low bound for between
-	b   float64        // high bound for between
+	a   *big.Rat       // operand for > >= == != , and low bound for between
+	b   *big.Rat       // high bound for between
 	dur time.Duration  // operand for age < / age >
 	re  *regexp.Regexp // operand for matches
 }
@@ -114,12 +117,28 @@ func ParseExpect(s string) (Expectation, error) {
 	default:
 		return Expectation{}, fmt.Errorf("expect %q: unknown operator %q", raw, fields[0])
 	}
-	n, err := strconv.ParseFloat(fields[1], 64)
+	n, err := parseNumber(fields[1])
 	if err != nil {
 		return Expectation{}, fmt.Errorf("expect %q: operand %q is not a number", raw, fields[1])
 	}
 	e.a = n
 	return e, nil
+}
+
+// parseNumber accepts what ParseFloat accepts (minus Inf/NaN and fractions),
+// held exactly as a rational.
+func parseNumber(s string) (*big.Rat, error) {
+	if strings.ContainsAny(s, "/") {
+		return nil, fmt.Errorf("not a number")
+	}
+	if _, err := strconv.ParseFloat(s, 64); err != nil {
+		return nil, fmt.Errorf("not a number")
+	}
+	r, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return nil, fmt.Errorf("not a number") // Inf/NaN pass ParseFloat but have no exact value
+	}
+	return r, nil
 }
 
 // now anchors age comparisons. A coercion failure wraps ErrCoercion.
@@ -141,6 +160,14 @@ func (e Expectation) Evaluate(actual string, now time.Time) (bool, error) {
 			return false, err
 		}
 		age := now.Sub(t)
+		// A future timestamp has no honest age: beyond small clock skew it is
+		// an error, never a silent pass of `age <` via a negative value.
+		if age < -futureSkewTolerance {
+			return false, fmt.Errorf("%w: timestamp %q is in the future (by %s)", ErrCoercion, strings.TrimSpace(actual), (-age).Round(time.Second))
+		}
+		if age < 0 {
+			age = 0
+		}
 		if e.op == opAgeLT {
 			return age < e.dur, nil
 		}
@@ -149,37 +176,41 @@ func (e Expectation) Evaluate(actual string, now time.Time) (bool, error) {
 	return false, fmt.Errorf("expect %q: %w", e.raw, ErrCoercion) // unreachable for parsed expectations
 }
 
-func (e Expectation) compareNumber(n float64) bool {
+// futureSkewTolerance forgives small cross-machine clock differences before
+// a future timestamp becomes an error.
+const futureSkewTolerance = 5 * time.Minute
+
+func (e Expectation) compareNumber(n *big.Rat) bool {
 	switch e.op {
 	case opGT:
-		return n > e.a
+		return n.Cmp(e.a) > 0
 	case opGE:
-		return n >= e.a
+		return n.Cmp(e.a) >= 0
 	case opEQ:
-		return n == e.a
+		return n.Cmp(e.a) == 0
 	case opNE:
-		return n != e.a
+		return n.Cmp(e.a) != 0
 	default: // opBetween
-		return n >= e.a && n <= e.b
+		return n.Cmp(e.a) >= 0 && n.Cmp(e.b) <= 0
 	}
 }
 
-func twoNumbers(fields []string) (float64, float64, error) {
+func twoNumbers(fields []string) (*big.Rat, *big.Rat, error) {
 	if len(fields) != 3 {
-		return 0, 0, fmt.Errorf("want two numbers")
+		return nil, nil, fmt.Errorf("want two numbers")
 	}
-	a, err1 := strconv.ParseFloat(fields[1], 64)
-	b, err2 := strconv.ParseFloat(fields[2], 64)
+	a, err1 := parseNumber(fields[1])
+	b, err2 := parseNumber(fields[2])
 	if err1 != nil || err2 != nil {
-		return 0, 0, fmt.Errorf("not numbers")
+		return nil, nil, fmt.Errorf("not numbers")
 	}
 	return a, b, nil
 }
 
-func toNumber(s string) (float64, error) {
-	n, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+func toNumber(s string) (*big.Rat, error) {
+	n, err := parseNumber(strings.TrimSpace(s))
 	if err != nil {
-		return 0, fmt.Errorf("%w: %q is not a number", ErrCoercion, s)
+		return nil, fmt.Errorf("%w: %q is not a number", ErrCoercion, s)
 	}
 	return n, nil
 }

@@ -129,6 +129,40 @@ func TestDumpdirL2PinBeatsNewerDump(t *testing.T) {
 	}
 }
 
+// A pinned dump overwritten in place (same name, new bytes, new mtime) is an
+// error — dumpdir's name-based pin verifies the audited timestamp.
+func TestDumpdirL2PinOverwrittenIsError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	auditedAt := base.Add(-2 * time.Hour)
+	writeDump(t, dir, "app.sql.gz", auditedAt)
+
+	step := pinnedDumpdirL2Step(t, dir, "app.sql.gz")
+	step.SnapshotTime = auditedAt // what L1 saw
+
+	// The overwrite: same filename, fresh mtime.
+	writeDump(t, dir, "app.sql.gz", base.Add(-time.Minute))
+
+	res, err := NewLocal("h").RunStep(context.Background(), step)
+	if err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if res.Status != checks.Error {
+		t.Fatalf("status = %s, want error", res.Status)
+	}
+	if !strings.Contains(res.Summary, "changed since it was audited") {
+		t.Errorf("summary = %q, want the changed-pin diagnosis", res.Summary)
+	}
+
+	// Unchanged mtime still passes the guard.
+	fresh := pinnedDumpdirL2Step(t, dir, "app.sql.gz")
+	fresh.SnapshotTime = base.Add(-time.Minute)
+	res, err = NewLocal("h").RunStep(context.Background(), fresh)
+	if err != nil || res.Status != checks.Pass {
+		t.Fatalf("matching mtime: status=%s err=%v, want pass", res.Status, err)
+	}
+}
+
 // A pinned dump that vanished is an error (the auditor cannot audit what the
 // run started on), never a silent switch to a different dump.
 func TestDumpdirL2PinMissingIsError(t *testing.T) {

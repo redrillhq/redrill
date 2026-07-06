@@ -87,16 +87,24 @@ func (d *Driver) Capabilities() driver.Capabilities {
 	return driver.Capabilities{NativeCheck: true, ListSnapshots: true, PartialRestore: true}
 }
 
-// env returns the inherited environment plus secret refs; never appears on argv.
+// env returns the environment for borg children: ambient BORG_* is dropped
+// (the config is the only sanctioned channel), secrets ride env never argv,
+// and the two access acknowledgements are pinned — borg would otherwise
+// *prompt* about a relocated or unknown-unencrypted repo, which under a
+// captured stdin reads EOF and surfaces as a spurious error. Answering yes
+// is safe here: access is read-only by construction.
 func (d *Driver) env() []string {
-	var extra []string
+	extra := []string{
+		"BORG_RELOCATED_REPO_ACCESS_IS_OK=yes",
+		"BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes",
+	}
 	if d.passphrase != "" {
 		extra = append(extra, "BORG_PASSPHRASE="+d.passphrase)
 	}
 	if d.sshKey != "" {
 		extra = append(extra, "BORG_RSH=ssh -i "+d.sshKey+" -o BatchMode=yes")
 	}
-	return subproc.Env(extra...)
+	return subproc.Env([]string{"BORG_"}, extra...)
 }
 
 func (d *Driver) Validate(ctx context.Context) error {
@@ -217,9 +225,13 @@ func parseList(b []byte) ([]driver.Snapshot, error) {
 	}
 	snaps := make([]driver.Snapshot, 0, len(lj.Archives))
 	for _, a := range lj.Archives {
+		// Tolerate an unparsable timestamp (zero time), matching parseFiles:
+		// one odd archive must not blind the auditor to the whole repository.
+		// A zero time reads as infinitely old, so freshness checks err on the
+		// alarming side, never the comforting one.
 		t, err := parseBorgTime(a.Time)
 		if err != nil {
-			return nil, fmt.Errorf("archive %q: %w", a.Name, err)
+			t = time.Time{}
 		}
 		snaps = append(snaps, driver.Snapshot{ID: a.Name, Time: t})
 	}

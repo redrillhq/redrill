@@ -157,6 +157,35 @@ func TestNativeCheckExitMapping(t *testing.T) {
 	}
 }
 
+// One archive with a mangled timestamp must not blind the auditor to the
+// whole repository — the entry stays listed with a zero time (infinitely
+// old: freshness errs on the alarming side), matching parseFiles.
+func TestParseListToleratesBadTimestamp(t *testing.T) {
+	t.Parallel()
+	snaps, err := parseList([]byte(`{"archives":[
+		{"name":"good","time":"2026-06-13T12:00:00.000000"},
+		{"name":"mangled","time":"not-a-time"}
+	]}`))
+	if err != nil {
+		t.Fatalf("parseList: %v (one bad timestamp must not fail the listing)", err)
+	}
+	if len(snaps) != 2 {
+		t.Fatalf("snaps = %d, want 2", len(snaps))
+	}
+	var mangled bool
+	for _, s := range snaps {
+		if s.ID == "mangled" {
+			mangled = true
+			if !s.Time.IsZero() {
+				t.Errorf("mangled time = %v, want zero", s.Time)
+			}
+		}
+	}
+	if !mangled {
+		t.Error("mangled archive dropped from the listing")
+	}
+}
+
 func TestSecretEnvWiringNeverOnArgv(t *testing.T) {
 	t.Parallel()
 	f := newFake()
@@ -170,6 +199,12 @@ func TestSecretEnvWiringNeverOnArgv(t *testing.T) {
 	}
 	if !strings.Contains(env, "BORG_RSH=ssh -i /keys/id_ed25519 -o BatchMode=yes") {
 		t.Errorf("BORG_RSH not wired: %q", env)
+	}
+	// The prompt suppressors must be pinned: a relocated repo would otherwise
+	// hang on a question no captured stdin can answer.
+	if !strings.Contains(env, "BORG_RELOCATED_REPO_ACCESS_IS_OK=yes") ||
+		!strings.Contains(env, "BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes") {
+		t.Error("borg access acknowledgements not pinned in env")
 	}
 	for _, call := range f.calls {
 		for _, arg := range call {

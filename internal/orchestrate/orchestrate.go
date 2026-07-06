@@ -221,7 +221,7 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 		return out, false, o.recordStep(ctx, runID, out, stepStart)
 	}
 
-	res, err := o.exec.RunStep(ctx, o.buildStep(runID, drill, src, lv, start, opts, prevFileCount, st.pin))
+	res, err := o.exec.RunStep(ctx, o.buildStep(runID, drill, src, lv, start, opts, prevFileCount, st))
 	switch {
 	case errors.Is(err, exec.ErrUnsupported):
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (unsupported level/source combination)"}
@@ -270,10 +270,11 @@ func (o *Orchestrator) recordStep(ctx context.Context, runID int64, out LevelOut
 	return nil
 }
 
-func (o *Orchestrator) buildStep(runID int64, drill config.Drill, src config.Source, lv leveled, now time.Time, opts RunOptions, prevFileCount int, pin string) exec.StepSpec {
+func (o *Orchestrator) buildStep(runID int64, drill config.Drill, src config.Source, lv leveled, now time.Time, opts RunOptions, prevFileCount int, st *levelState) exec.StepSpec {
 	spec := exec.StepSpec{
 		RunID: runID, Drill: drill.Name, Level: lv.name, Source: src, Now: now,
-		Scratch: opts.Scratch, PrevFileCount: prevFileCount, Snapshot: pin, Keep: opts.Keep,
+		Scratch: opts.Scratch, PrevFileCount: prevFileCount, Keep: opts.Keep,
+		Snapshot: st.pin, SnapshotTime: st.pinAt,
 	}
 	switch lv.name {
 	case "l1":

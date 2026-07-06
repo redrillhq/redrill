@@ -8,6 +8,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -102,8 +104,24 @@ func (r *Runtime) ensureImage(ctx context.Context, ref string) error {
 		return fmt.Errorf("pull %s: %w", ref, err)
 	}
 	defer func() { _ = rc.Close() }()
-	_, _ = io.Copy(io.Discard, rc) // drain so the pull completes
-	return nil
+	// The pull's failures arrive as JSON messages inside the stream; a blind
+	// drain would swallow them and surface later as a baffling "no such
+	// image". Decode each message and surface the first error.
+	dec := json.NewDecoder(rc)
+	for {
+		var msg struct {
+			Error string `json:"error"`
+		}
+		if err := dec.Decode(&msg); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("pull %s: reading pull stream: %w", ref, err)
+		}
+		if msg.Error != "" {
+			return fmt.Errorf("pull %s: %s", ref, msg.Error)
+		}
+	}
 }
 
 // Janitor force-removes every container labeled by redrill (orphans from crashed
@@ -239,22 +257,35 @@ func (s *dockerSandbox) terminalState(ctx context.Context) (status string, exitC
 	return "", 0, false
 }
 
+// copyIn streams the file into the container as a tar — never buffering the
+// dump in memory (a ReadAll here once cost ~2× the dump size in RAM).
 func (s *dockerSandbox) copyIn(ctx context.Context, f sandbox.FileInject) error {
-	data, err := os.ReadFile(f.HostPath)
+	src, err := os.Open(f.HostPath)
 	if err != nil {
 		return err
 	}
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	// Container paths are always slash-separated, hence path, not filepath.
-	if err := tw.WriteHeader(&tar.Header{Name: path.Base(f.ContainerPath), Mode: 0o600, Size: int64(len(data))}); err != nil {
+	defer func() { _ = src.Close() }()
+	info, err := src.Stat()
+	if err != nil {
 		return err
 	}
-	if _, err := tw.Write(data); err != nil {
+
+	pr, pw := io.Pipe()
+	go func() {
+		tw := tar.NewWriter(pw)
+		// Container paths are always slash-separated, hence path, not filepath.
+		err := tw.WriteHeader(&tar.Header{Name: path.Base(f.ContainerPath), Mode: 0o600, Size: info.Size()})
+		if err == nil {
+			_, err = io.Copy(tw, src)
+		}
+		if err == nil {
+			err = tw.Close()
+		}
+		pw.CloseWithError(err) // a nil err closes cleanly
+	}()
+	if err := s.cli.CopyToContainer(ctx, s.id, path.Dir(f.ContainerPath), pr, container.CopyToContainerOptions{}); err != nil {
+		_ = pr.CloseWithError(err) // unblock the writer goroutine
 		return err
 	}
-	if err := tw.Close(); err != nil {
-		return err
-	}
-	return s.cli.CopyToContainer(ctx, s.id, path.Dir(f.ContainerPath), &buf, container.CopyToContainerOptions{})
+	return nil
 }

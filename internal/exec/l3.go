@@ -48,6 +48,15 @@ func (e *LocalExecutor) runDumpdirL3(ctx context.Context, step StepSpec) (StepRe
 	if msg != "" {
 		return errorStep(res, msg), nil
 	}
+	if step.Snapshot != "" {
+		fi, serr := os.Stat(d.Path(snap.ID))
+		if serr != nil {
+			return errorStep(res, fmt.Sprintf("pinned dump %s: %v", snap.ID, serr)), nil
+		}
+		if msg := pinnedDumpChanged(step, fi.ModTime()); msg != "" {
+			return errorStep(res, msg), nil
+		}
+	}
 	res.Snapshot, res.SnapshotTime = snap.ID, snap.Time
 	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
 	if err != nil {

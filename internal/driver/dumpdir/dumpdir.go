@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/redrillhq/redrill/internal/driver"
 )
@@ -85,14 +86,29 @@ func (d *Driver) NativeCheck(ctx context.Context, _ driver.NativeCheckOpts) (dri
 }
 
 // Path returns a dump file's absolute path by snapshot ID, for checks that
-// inspect it in place.
-func (d *Driver) Path(id string) string { return filepath.Join(d.dir, id) }
+// inspect it in place. IDs are base names by construction (ListSnapshots
+// emits them); anything path-shaped is rejected so a hostile ID arriving
+// through the exported API (or, later, a remote StepSpec) cannot traverse.
+func (d *Driver) Path(id string) string {
+	if !validID(id) {
+		return filepath.Join(d.dir, "invalid-snapshot-id")
+	}
+	return filepath.Join(d.dir, id)
+}
+
+// validID accepts only the base names ListSnapshots produces.
+func validID(id string) bool {
+	return id != "" && id != "." && id != ".." && !strings.ContainsAny(id, `/\`)
+}
 
 func (d *Driver) Restore(ctx context.Context, sel driver.Selection, targetDir string) (driver.RestoreReport, error) {
 	var rep driver.RestoreReport
 	for _, id := range sel.SnapshotIDs {
 		if err := ctx.Err(); err != nil {
 			return rep, fmt.Errorf("dumpdir %s: restore: %w", d.dir, err)
+		}
+		if !validID(id) {
+			return rep, fmt.Errorf("dumpdir %s: restore: invalid snapshot id %q", d.dir, id)
 		}
 		n, err := copyFile(d.Path(id), filepath.Join(targetDir, id))
 		if err != nil {

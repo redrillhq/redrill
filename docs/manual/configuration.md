@@ -264,6 +264,7 @@ with zero evidence (advisory `size_anomaly_pct` alone doesn't count).
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `native_check` | bool | unset | Run the engine's own check (`borg check` / `restic check`). |
+| `read_data_subset_pct` | int | unset | **restic only**, requires `native_check: true`: read this percent of pack data during the check (`--read-data-subset`), catching in-pack bit rot the structural check cannot see. `1..100` — higher reads more, costs more IO; plain `restic check` reads no blob data at all (borg's check already does). |
 | `snapshot_max_age` | [duration](#duration) | unset | `fail` if the newest snapshot is older than this. |
 | `size_anomaly_pct` | int | unset | Advisory (always passes, may warn; weak-labeled): flag a latest snapshot more than this percent below the trailing average. `0..100`. |
 

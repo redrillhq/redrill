@@ -132,6 +132,65 @@ func TestEvaluate(t *testing.T) {
 	}
 }
 
+// Integer counts above 2^53 must compare exactly — float64 == silently
+// collides adjacent values there (2026-06-14 review deferral, fixed with
+// big.Rat arithmetic).
+func TestEvaluateExactIntegers(t *testing.T) {
+	t.Parallel()
+	e, err := ParseExpect("== 9007199254740993") // 2^53 + 1
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.Evaluate("9007199254740993", time.Time{}); !got {
+		t.Error("exact match rejected")
+	}
+	if got, _ := e.Evaluate("9007199254740992", time.Time{}); got {
+		t.Error("2^53 collision: adjacent integer compared equal")
+	}
+	ne, err := ParseExpect("!= 9007199254740992")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := ne.Evaluate("9007199254740993", time.Time{}); !got {
+		t.Error("2^53 collision: != missed a real difference")
+	}
+}
+
+// A future timestamp has no honest age: small clock skew is forgiven, real
+// future is a coercion error — never a silent pass of `age <`.
+func TestEvaluateFutureTimestamp(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+	e, err := ParseExpect("age < 8d")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2 minutes ahead: within skew tolerance, treated as age 0 → passes.
+	got, err := e.Evaluate(now.Add(2*time.Minute).Format(time.RFC3339), now)
+	if err != nil || !got {
+		t.Errorf("small skew: got=%v err=%v, want pass", got, err)
+	}
+
+	// A day ahead: error wrapping ErrCoercion, not a pass.
+	_, err = e.Evaluate(now.Add(24*time.Hour).Format(time.RFC3339), now)
+	if err == nil {
+		t.Fatal("future timestamp evaluated without error (would silently pass age <)")
+	}
+	if !errors.Is(err, ErrCoercion) {
+		t.Errorf("future-timestamp error does not wrap ErrCoercion: %v", err)
+	}
+
+	// age > must error the same way, not silently fail.
+	gt, err2 := ParseExpect("age > 1h")
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	if _, err := gt.Evaluate(now.Add(24*time.Hour).Format(time.RFC3339), now); !errors.Is(err, ErrCoercion) {
+		t.Errorf("age >: future timestamp err = %v, want ErrCoercion", err)
+	}
+}
+
 // SQL scalars arrive in several timestamp shapes; age comparisons must coerce each.
 func TestEvaluateTimeLayouts(t *testing.T) {
 	t.Parallel()

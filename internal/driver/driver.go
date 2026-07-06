@@ -30,7 +30,12 @@ type FileEntry struct {
 	IsFile bool // regular file (not a directory or symlink)
 }
 
-type NativeCheckOpts struct{}
+type NativeCheckOpts struct {
+	// ReadDataSubsetPct (restic only): read this percentage of pack data
+	// during the check, catching in-pack bit rot the structural check cannot
+	// see. 0 = structural check only.
+	ReadDataSubsetPct int
+}
 
 type Report struct {
 	OK      bool

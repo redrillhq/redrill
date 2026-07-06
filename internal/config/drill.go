@@ -35,6 +35,10 @@ type L1 struct {
 	SnapshotMaxAge *Duration `yaml:"snapshot_max_age"`
 	SizeAnomalyPct *int      `yaml:"size_anomaly_pct"`
 
+	// restic only: native_check reads N% of pack data (--read-data-subset),
+	// catching in-pack bit rot that the structural check cannot see.
+	ReadDataSubsetPct *int `yaml:"read_data_subset_pct"`
+
 	FileMinBytes    *Size     `yaml:"file_min_bytes"`
 	CompressionTest *bool     `yaml:"compression_test"`
 	MaxAge          *Duration `yaml:"max_age"`
@@ -119,6 +123,17 @@ func (l *L1) validate(path, srcType string, es *errset) {
 			es.add(path+".max_age", "not valid for %s source", srcType)
 		}
 	}
+	if l.ReadDataSubsetPct != nil {
+		if srcType != "restic" {
+			es.add(path+".read_data_subset_pct", "not valid for %s source (restic only)", srcType)
+		}
+		if p := *l.ReadDataSubsetPct; p < 1 || p > 100 {
+			es.add(path+".read_data_subset_pct", "must be 1..100, got %d", p)
+		}
+		if l.NativeCheck == nil || !*l.NativeCheck {
+			es.add(path+".read_data_subset_pct", "requires native_check: true (it deepens the native check)")
+		}
+	}
 	if l.SizeAnomalyPct != nil && (*l.SizeAnomalyPct < 0 || *l.SizeAnomalyPct > 100) {
 		es.add(path+".size_anomaly_pct", "must be 0..100, got %d", *l.SizeAnomalyPct)
 	}
@@ -147,6 +162,14 @@ func (l *L2) validate(path, srcType string, es *errset) {
 		// preflight prediction, bypassing the quota's early refusal.
 		if l.Restore.Scope != "full" && l.Restore.Sample == nil && len(l.Restore.IncludePaths) == 0 {
 			es.add(path+".restore", "a sample-scope restore requires sample or include_paths (use scope: full to restore everything)")
+		}
+		if s := l.Restore.Sample; s != nil {
+			if s.Files < 0 {
+				es.add(path+".restore.sample.files", "must be >= 0, got %d", s.Files)
+			}
+			if s.Newest < 0 {
+				es.add(path+".restore.sample.newest", "must be >= 0, got %d", s.Newest)
+			}
 		}
 	case "mount":
 		// A FUSE mount exposes the whole snapshot on demand; there is no copy

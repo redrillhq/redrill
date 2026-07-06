@@ -7,6 +7,7 @@ package orchestrate
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -164,6 +165,64 @@ func TestSabotageVersionTrap(t *testing.T) {
 	})
 	mustFail(t, res, "version-trap")
 	assertCaught(t, res, "load")
+}
+
+// restic-bitrot (restic L1 native_check --read-data-subset): a byte flipped
+// inside a pack's blob data. restic's pack header sits at the END of the
+// file, so the structural check never reads the flipped byte — only the
+// read-data pass catches this class.
+func TestSabotageResticBitrot(t *testing.T) {
+	fixtures.RequireRestic(t)
+	repo, passFile := fixtures.Restic(t)
+
+	// Flip one byte a quarter into the largest pack: inside blob data, far
+	// from the trailing header.
+	pack, size := largestPack(t, filepath.Join(repo, "data"))
+	f, err := os.OpenFile(pack, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := make([]byte, 1)
+	off := size / 4
+	if _, err := f.ReadAt(b, off); err != nil {
+		t.Fatal(err)
+	}
+	b[0] ^= 0xFF
+	if _, err := f.WriteAt(b, off); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	pct := 100 // deterministic: read every pack
+	nc := true
+	drill := config.Drill{Name: "files", Source: "vault", Levels: config.Levels{
+		L1: &config.L1{NativeCheck: &nc, ReadDataSubsetPct: &pct},
+	}}
+	src := config.Source{Name: "vault", Type: "restic", Repo: repo, PasswordFile: passFile}
+	res := runDrill(t, newStore(t), drill, src, RunOptions{})
+	mustFail(t, res, "restic-bitrot")
+	assertCaught(t, res, "native_check")
+}
+
+func largestPack(t *testing.T, dataDir string) (string, int64) {
+	t.Helper()
+	var pack string
+	var size int64
+	err := filepath.WalkDir(dataDir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if info, ierr := d.Info(); ierr == nil && info.Size() > size {
+			pack, size = p, info.Size()
+		}
+		return nil
+	})
+	if err != nil || pack == "" {
+		t.Fatalf("no pack found under %s (err=%v)", dataDir, err)
+	}
+	return pack, size
 }
 
 // tcp-dead-service (dumpdir L3 tcp): the "service answers" probe must fail

@@ -41,7 +41,8 @@ func StartMount(ctx context.Context, dir string, env []string, name string, args
 	cmd := osexec.CommandContext(ctx, name, args...) //nolint:gosec // G204: argv is built by the drivers, not from user input
 	cmd.Dir = dir
 	cmd.Env = env
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return signalGroup(cmd, syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("%s mount: %w", name, err)

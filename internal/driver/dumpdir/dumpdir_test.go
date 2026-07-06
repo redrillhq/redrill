@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,5 +116,24 @@ func TestNativeCheckUnsupported(t *testing.T) {
 	t.Parallel()
 	if _, err := New(t.TempDir(), "*.gz").NativeCheck(context.Background(), driver.NativeCheckOpts{}); err == nil {
 		t.Error("NativeCheck on dumpdir should error (no native check)")
+	}
+}
+
+// Snapshot IDs are base names by construction; anything path-shaped must be
+// rejected, not joined — the traversal guard for the exported API and for
+// StepSpecs that will one day cross a host boundary.
+func TestPathShapedIDsRejected(t *testing.T) {
+	t.Parallel()
+	src := t.TempDir()
+	writeDump(t, src, "a.sql.gz", "alpha", base)
+	d := New(src, "*.sql.gz")
+
+	for _, id := range []string{"../../etc/passwd", "/etc/passwd", "a/../b", "..", ".", ""} {
+		if _, err := d.Restore(context.Background(), driver.Selection{SnapshotIDs: []string{id}}, t.TempDir()); err == nil {
+			t.Errorf("Restore accepted path-shaped id %q", id)
+		}
+		if got := d.Path(id); strings.Contains(got, "..") || got == id {
+			t.Errorf("Path(%q) = %q leaks a traversal shape", id, got)
+		}
 	}
 }

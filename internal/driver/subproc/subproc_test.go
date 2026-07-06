@@ -69,20 +69,28 @@ func TestOutput(t *testing.T) {
 	}
 }
 
-func TestEnvInheritsAndAppends(t *testing.T) {
+func TestEnvInheritsScrubsAndAppends(t *testing.T) {
 	t.Setenv("SUBPROC_TEST_MARKER", "yes")
-	env := Env("EXTRA_KEY=v")
-	var marker, extra bool
+	t.Setenv("REDRILL_API_KEYS", "super-secret-token")   // daemon auth: never reaches engines
+	t.Setenv("BORG_PASSPHRASE", "ambient-should-vanish") // ambient engine var: dropped on request
+	env := Env([]string{"BORG_"}, "EXTRA_KEY=v", "BORG_PASSPHRASE=ours")
+	var marker, extra, ours bool
 	for _, kv := range env {
 		switch kv {
 		case "SUBPROC_TEST_MARKER=yes":
 			marker = true
 		case "EXTRA_KEY=v":
 			extra = true
+		case "BORG_PASSPHRASE=ours":
+			ours = true
+		case "REDRILL_API_KEYS=super-secret-token":
+			t.Error("REDRILL_* leaked into an engine child")
+		case "BORG_PASSPHRASE=ambient-should-vanish":
+			t.Error("ambient BORG_* survived the scrub")
 		}
 	}
-	if !marker || !extra {
-		t.Fatalf("env missing inherited (%v) or extra (%v) entry", marker, extra)
+	if !marker || !extra || !ours {
+		t.Fatalf("env missing inherited (%v), extra (%v), or driver-set (%v) entry", marker, extra, ours)
 	}
 }
 

@@ -96,9 +96,13 @@ func (d *Driver) Capabilities() driver.Capabilities {
 	return driver.Capabilities{NativeCheck: true, ListSnapshots: true, PartialRestore: true}
 }
 
-// env returns the inherited environment plus secret refs; never appears on argv.
+// env returns the environment for restic children: ambient RESTIC_* is
+// dropped (the config is the only sanctioned channel — an inherited
+// RESTIC_REPOSITORY would redirect the audit), secrets ride env never argv.
 // The repo rides RESTIC_REPOSITORY too: backend URLs can embed credentials
-// (rest:https://user:pass@host/), which argv would expose to `ps`.
+// (rest:https://user:pass@host/), which argv would expose to `ps`. Ambient
+// backend vars (AWS_*, B2_*) are deliberately kept — credentials from the
+// daemon's environment are a legitimate setup; env_file entries override.
 func (d *Driver) env() []string {
 	extra := []string{"RESTIC_REPOSITORY=" + d.repo}
 	if d.password != "" {
@@ -107,7 +111,7 @@ func (d *Driver) env() []string {
 	for k, v := range d.backendEnv {
 		extra = append(extra, k+"="+v)
 	}
-	return subproc.Env(extra...)
+	return subproc.Env([]string{"RESTIC_"}, extra...)
 }
 
 // global prefixes an optional rate limit before a subcommand.
@@ -140,8 +144,12 @@ func (d *Driver) ListSnapshots(ctx context.Context) ([]driver.Snapshot, error) {
 // failing Report), not that the auditor is blind. A process that can't start or
 // died without an exit code (killed, OOM) is an error. No --no-lock: restic
 // check takes the repository's exclusive lock by engine design.
-func (d *Driver) NativeCheck(ctx context.Context, _ driver.NativeCheckOpts) (driver.Report, error) {
-	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, d.global("check"))
+func (d *Driver) NativeCheck(ctx context.Context, opts driver.NativeCheckOpts) (driver.Report, error) {
+	args := d.global("check")
+	if opts.ReadDataSubsetPct > 0 {
+		args = append(args, fmt.Sprintf("--read-data-subset=%d%%", opts.ReadDataSubsetPct))
+	}
+	stdout, stderr, exit, err := d.run(ctx, "", d.env(), d.binary, args)
 	if err != nil {
 		return driver.Report{}, fmt.Errorf("restic check %s: %w", d.repo, err)
 	}

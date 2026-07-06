@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -106,6 +107,11 @@ func parseSize(s string) (int64, error) {
 			n, err := strconv.ParseFloat(strings.TrimSpace(rest), 64)
 			if err != nil || n < 0 {
 				return 0, fmt.Errorf("invalid size %q (want e.g. 1MiB, 50GiB)", s)
+			}
+			// Out-of-range float→int64 conversion is implementation-defined;
+			// an absurd size must be a config error, not a silent saturation.
+			if n*u.mult >= math.MaxInt64 {
+				return 0, fmt.Errorf("size %q is too large", s)
 			}
 			return int64(n * u.mult), nil
 		}

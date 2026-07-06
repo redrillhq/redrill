@@ -87,7 +87,12 @@ var checkCatalog = map[string]checkSpec{
 	checkNewestFileMaxAge: {levels: lvl("l2"),
 		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.NewestFileMaxAge) }},
 	checkFileCountTol: {levels: lvl("l2"),
-		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.FileCountTolerancePct) }},
+		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.FileCountTolerancePct) },
+		validate: func(c *Check, path, _, _ string, es *errset) {
+			if c.FileCountTolerancePct < 0 || c.FileCountTolerancePct > 100 {
+				es.add(path, "file_count_tolerance_pct must be 0..100, got %d", c.FileCountTolerancePct)
+			}
+		}},
 	checkMinTotalBytes: {levels: lvl("l2"),
 		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.MinTotalBytes) }},
 	checkFileCount: {levels: lvl("l2"),

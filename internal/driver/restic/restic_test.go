@@ -178,6 +178,26 @@ func TestParseStatsSize(t *testing.T) {
 
 // restic check: exit 0 clean, non-zero errors-found (fail, not Go error after
 // Validate has proven reachability); a process that can't start is a Go error.
+// The read-data knob rides check's argv when set — and only then.
+func TestNativeCheckReadDataSubset(t *testing.T) {
+	t.Parallel()
+	f := newFake()
+	d := New("/r", WithRunner(f.run))
+	_, _ = d.NativeCheck(context.Background(), driver.NativeCheckOpts{ReadDataSubsetPct: 25})
+	_, _ = d.NativeCheck(context.Background(), driver.NativeCheckOpts{})
+	if len(f.calls) != 2 {
+		t.Fatalf("calls = %d, want 2", len(f.calls))
+	}
+	withKnob := strings.Join(f.calls[0], " ")
+	if !strings.Contains(withKnob, "--read-data-subset=25%") {
+		t.Errorf("knob missing from argv: %v", f.calls[0])
+	}
+	plain := strings.Join(f.calls[1], " ")
+	if strings.Contains(plain, "read-data-subset") {
+		t.Errorf("knob present without opts: %v", f.calls[1])
+	}
+}
+
 func TestNativeCheckExitMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

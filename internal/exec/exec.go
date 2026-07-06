@@ -49,8 +49,12 @@ type StepSpec struct {
 	// run audits the same backup — a backup landing mid-run must not split the
 	// audit. Empty = resolve newest and report it via StepResult.Snapshot.
 	// A pinned L2/L3 also skips the repo listing (restores are heavy; be
-	// frugal with IO).
-	Snapshot string `json:"snapshot,omitempty"`
+	// frugal with IO). SnapshotTime carries the pin's own timestamp: borg and
+	// restic IDs name immutable snapshots, but a dumpdir ID is a filename, so
+	// dumpdir levels verify the pinned file's mtime still matches — an
+	// in-place overwrite must not masquerade as the audited backup.
+	Snapshot     string    `json:"snapshot,omitempty"`
+	SnapshotTime time.Time `json:"snapshot_time,omitzero"`
 
 	// Keep leaves the L3 sandbox running and the scratch restore in place for
 	// human forensics (`run --keep`). Kept resources stay redrill-labeled, so
@@ -340,7 +344,7 @@ func (e *LocalExecutor) runBorgL1(ctx context.Context, step StepSpec) (StepResul
 		return errorStep(res, "no L1 config in step"), nil
 	}
 	if l1.NativeCheck != nil && *l1.NativeCheck {
-		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, red))
+		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, driver.NativeCheckOpts{}, red))
 	}
 	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
 		evs, newest := archiveChecks(ctx, d, d.ArchiveSize, l1, step.Now, red)
@@ -391,7 +395,11 @@ func (e *LocalExecutor) runResticL1(ctx context.Context, step StepSpec) (StepRes
 		return errorStep(res, "no L1 config in step"), nil
 	}
 	if l1.NativeCheck != nil && *l1.NativeCheck {
-		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, red))
+		opts := driver.NativeCheckOpts{}
+		if l1.ReadDataSubsetPct != nil {
+			opts.ReadDataSubsetPct = *l1.ReadDataSubsetPct
+		}
+		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, opts, red))
 	}
 	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
 		evs, newest := archiveChecks(ctx, d, d.SnapshotSize, l1, step.Now, red)
@@ -405,6 +413,18 @@ func (e *LocalExecutor) runResticL1(ctx context.Context, step StepSpec) (StepRes
 	res.Status = aggregate(res.Evidence)
 	res.Summary = red.Redact(summarize(res.Status, res.Evidence))
 	return res, nil
+}
+
+// pinnedDumpChanged guards dumpdir's name-based pin: the file's mtime must
+// still match the audited snapshot's timestamp, or the level errors — an
+// in-place overwrite with the same name must not masquerade as the audited
+// backup. A zero pin time (no timestamp resolved) skips the guard.
+func pinnedDumpChanged(step StepSpec, mtime time.Time) string {
+	if step.SnapshotTime.IsZero() || mtime.UTC().Equal(step.SnapshotTime.UTC()) {
+		return ""
+	}
+	return fmt.Sprintf("pinned dump %s changed since it was audited (mtime %s, audited %s)",
+		step.Snapshot, mtime.UTC().Format(time.RFC3339Nano), step.SnapshotTime.UTC().Format(time.RFC3339Nano))
 }
 
 // resolveSnapshot returns the snapshot a restore level audits: the spec's
@@ -431,9 +451,9 @@ type nativeChecker interface {
 }
 
 // nativeCheckEvidence: OK → pass, errors → fail, couldn't run → error.
-func nativeCheckEvidence(ctx context.Context, d nativeChecker, red *redact.Redactor) checks.Evidence {
+func nativeCheckEvidence(ctx context.Context, d nativeChecker, opts driver.NativeCheckOpts, red *redact.Redactor) checks.Evidence {
 	ev := checks.Evidence{Kind: "native_check", Target: "repository", Expected: d.Name() + " check passed"}
-	rep, err := d.NativeCheck(ctx, driver.NativeCheckOpts{})
+	rep, err := d.NativeCheck(ctx, opts)
 	switch {
 	case err != nil:
 		ev.Status, ev.Actual = checks.Error, err.Error()
@@ -713,6 +733,9 @@ func runDumpdirL2(ctx context.Context, step StepSpec) (StepResult, error) {
 		fi, err := os.Stat(d.Path(step.Snapshot))
 		if err != nil {
 			return errorStep(res, fmt.Sprintf("pinned dump %s: %v", step.Snapshot, err)), nil
+		}
+		if msg := pinnedDumpChanged(step, fi.ModTime()); msg != "" {
+			return errorStep(res, msg), nil
 		}
 		ids, predicted = []string{step.Snapshot}, fi.Size()
 		res.Snapshot = step.Snapshot

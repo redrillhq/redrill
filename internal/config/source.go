@@ -35,6 +35,10 @@ func (s *Source) validate(path string, es *errset) {
 		if s.Repo == "" {
 			es.add(path+".repo", "required for borg source")
 		}
+		// Both refs set would silently prefer the file — force one channel.
+		if s.PassphraseFile != "" && s.PassphraseEnv != "" {
+			es.add(path, "set passphrase_file or passphrase_env, not both")
+		}
 		reject(es, path, "borg", map[string]bool{
 			"path": s.Path != "", "pattern": s.Pattern != "", "pick": s.Pick != "",
 			"password_file": s.PasswordFile != "", "password_env": s.PasswordEnv != "",
@@ -46,6 +50,9 @@ func (s *Source) validate(path string, es *errset) {
 		}
 		if s.PasswordFile == "" && s.PasswordEnv == "" {
 			es.add(path, "restic source requires password_file or password_env")
+		}
+		if s.PasswordFile != "" && s.PasswordEnv != "" {
+			es.add(path, "set password_file or password_env, not both")
 		}
 		reject(es, path, "restic", map[string]bool{
 			"path": s.Path != "", "pattern": s.Pattern != "", "pick": s.Pick != "",

@@ -36,8 +36,11 @@ func ExecRunner(ctx context.Context, dir string, env []string, name string, args
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: argv is built by the drivers, not from user input
 	cmd.Dir = dir
 	cmd.Env = env
+	// Own process group, and cancel signals the whole group: engines spawn
+	// helpers (borg's ssh), and a lone child SIGTERM would orphan them.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// SIGTERM first so the engine can release its repo lock; kill after WaitDelay.
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.Cancel = func() error { return signalGroup(cmd, syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -59,9 +62,40 @@ func ExecRunner(ctx context.Context, dir string, env []string, name string, args
 }
 
 // Env returns the inherited environment plus extra KEY=VALUE pairs — the one
-// place engine env assembly happens.
-func Env(extra ...string) []string {
-	return append(os.Environ(), extra...)
+// place engine env assembly happens. Two scrubs apply: REDRILL_* never
+// reaches engine children (the daemon's own auth env holds credentials), and
+// the caller's dropPrefixes remove ambient engine vars (an inherited
+// BORG_PASSPHRASE or BORG_REPO would change behavior behind the config's
+// back — the config's *_file/*_env refs are the only sanctioned channel).
+func Env(dropPrefixes []string, extra ...string) []string {
+	drop := append([]string{"REDRILL_"}, dropPrefixes...)
+	env := os.Environ()
+	out := make([]string, 0, len(env)+len(extra))
+	for _, kv := range env {
+		skip := false
+		for _, p := range drop {
+			if strings.HasPrefix(kv, p) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			out = append(out, kv)
+		}
+	}
+	return append(out, extra...)
+}
+
+// signalGroup signals the child's process group, falling back to the child
+// itself when the group is gone.
+func signalGroup(cmd *exec.Cmd, sig syscall.Signal) error {
+	if cmd.Process == nil {
+		return nil
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, sig); err == nil {
+		return nil
+	}
+	return cmd.Process.Signal(sig)
 }
 
 // Output runs the command and returns stdout, treating any non-zero exit as

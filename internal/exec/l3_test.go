@@ -20,9 +20,11 @@ type fakeSandbox struct {
 	spec   sandbox.SandboxSpec
 	exec   func(cmd []string) sandbox.ExecResult
 	closed bool
+	id     string
 }
 
 func (s *fakeSandbox) Endpoint(string) (string, error) { return "", nil }
+func (s *fakeSandbox) ID() string                      { return s.id }
 func (s *fakeSandbox) Exec(_ context.Context, cmd []string) (sandbox.ExecResult, error) {
 	return s.exec(cmd), nil
 }

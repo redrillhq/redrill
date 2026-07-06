@@ -53,7 +53,7 @@ func (e *LocalExecutor) runDumpdirL3(ctx context.Context, step StepSpec) (StepRe
 	if err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	defer sc.cleanup()
+	defer sc.cleanupUnless(step.Keep)
 	return e.loadAndCheck(ctx, step, sc, d.Path(snap.ID), red, snap)
 }
 
@@ -87,7 +87,7 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 	if err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	defer sc.cleanup()
+	defer sc.cleanupUnless(step.Keep)
 	extractDir := filepath.Join(sc.root, "extract")
 	if err := os.MkdirAll(extractDir, 0o700); err != nil {
 		return errorStep(res, err.Error()), nil
@@ -123,7 +123,7 @@ func (e *LocalExecutor) runResticL3(ctx context.Context, step StepSpec) (StepRes
 	if err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	defer sc.cleanup()
+	defer sc.cleanupUnless(step.Keep)
 	extractDir := filepath.Join(sc.root, "extract")
 	if err := os.MkdirAll(extractDir, 0o700); err != nil {
 		return errorStep(res, err.Error()), nil
@@ -134,8 +134,8 @@ func (e *LocalExecutor) runResticL3(ctx context.Context, step StepSpec) (StepRes
 	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red, snap)
 }
 
-func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scratch, dumpSrc string, red *redact.Redactor, snap driver.Snapshot) (StepResult, error) {
-	res := StepResult{Level: step.Level, Snapshot: snap.ID, SnapshotTime: snap.Time}
+func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scratch, dumpSrc string, red *redact.Redactor, snap driver.Snapshot) (res StepResult, _ error) {
+	res = StepResult{Level: step.Level, Snapshot: snap.ID, SnapshotTime: snap.Time}
 	l3 := step.L3
 	loaded, format, err := stageDump(dumpSrc, sc.root, sc.maxBytes)
 	if err != nil {
@@ -165,7 +165,16 @@ func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scr
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
 	// Teardown must survive the run's own timeout being the reason we're here.
+	// Under Keep the sandbox is left running for forensics — whatever the
+	// verdict (a failed load is exactly what an operator wants to inspect);
+	// the next serve start's janitor reaps it.
 	defer func() {
+		if step.Keep {
+			if ident, ok := sb.(interface{ ID() string }); ok {
+				res.KeptSandbox = ident.ID()
+			}
+			return
+		}
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		_ = sb.Close(closeCtx)

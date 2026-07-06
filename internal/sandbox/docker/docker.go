@@ -136,6 +136,10 @@ func (s *dockerSandbox) Endpoint(string) (string, error) {
 	return "", fmt.Errorf("sandbox endpoints are unavailable under network=none; use Exec")
 }
 
+// ID is the container id — surfaced so `run --keep` can print exec hints for
+// a kept sandbox.
+func (s *dockerSandbox) ID() string { return s.id }
+
 func (s *dockerSandbox) Exec(ctx context.Context, cmd []string) (sandbox.ExecResult, error) {
 	ex, err := s.cli.ContainerExecCreate(ctx, s.id, container.ExecOptions{
 		Cmd: cmd, AttachStdout: true, AttachStderr: true,

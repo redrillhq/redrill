@@ -223,6 +223,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	path := fs.String("c", configFileDefault(), "config file path (or set $REDRILL_CONFIG)")
 	level := fs.String("level", "", "run only this level (l1|l2|l3)")
 	all := fs.Bool("all", false, "run every configured drill, sequentially")
+	keep := fs.Bool("keep", false, "keep the L3 sandbox and scratch restore for inspection (reaped at the next serve start)")
 	jsonOut := fs.Bool("json", false, "machine-readable output")
 	name, ok, err := parseNameAndFlags(fs, args)
 	if err != nil {
@@ -288,7 +289,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		if len(names) > 1 && !*jsonOut {
 			fmt.Fprintf(stdout, "== %s ==\n", n)
 		}
-		opts := orchestrate.RunOptions{Trigger: store.TriggerManual, Level: *level, Scratch: cfg.Scratch}
+		opts := orchestrate.RunOptions{Trigger: store.TriggerManual, Level: *level, Scratch: cfg.Scratch, Keep: *keep}
 		if !*jsonOut {
 			opts.Report = func(out orchestrate.LevelOutcome) { printLevel(stdout, out) }
 		}
@@ -309,10 +310,13 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		if *jsonOut {
-			results = append(results, runResultJSON(n, res))
+			results = append(results, runResultJSON(n, res, *keep, cfg.Scratch.Dir))
 		} else {
 			fmt.Fprintf(stdout, "redrill: %s → %s (reached %s, run %d)\n",
 				n, strings.ToUpper(string(res.Status)), res.LevelReached, res.RunID)
+			if *keep {
+				printKeepHints(stdout, res, cfg.Scratch.Dir)
+			}
 		}
 		worst = worseResult(worst, res.Status)
 	}
@@ -478,7 +482,27 @@ func resultExit(s store.Result) int {
 	}
 }
 
-func runResultJSON(drill string, res orchestrate.RunResult) any {
+// printKeepHints shows what --keep left behind and how to reach and remove
+// it. Kept resources stay redrill-labeled: the next serve start reaps them.
+func printKeepHints(w io.Writer, res orchestrate.RunResult, scratchDir string) {
+	scratch := filepath.Join(scratchDir, fmt.Sprintf("run-%d", res.RunID))
+	if _, err := os.Stat(scratch); err == nil {
+		fmt.Fprintf(w, "kept: scratch restore at %s\n", scratch)
+	}
+	if id := res.KeptSandbox; id != "" {
+		short := id
+		if len(short) > 12 {
+			short = short[:12]
+		}
+		fmt.Fprintf(w, "kept: L3 sandbox running (container %s, network=none)\n", short)
+		fmt.Fprintf(w, "  psql:   docker exec -it %s psql -U postgres   (\\l lists databases)\n", short)
+		fmt.Fprintf(w, "  shell:  docker exec -it %s bash\n", short)
+		fmt.Fprintf(w, "  remove: docker rm -f %s\n", short)
+	}
+	fmt.Fprintln(w, "kept resources are removed at the next `redrill serve` start")
+}
+
+func runResultJSON(drill string, res orchestrate.RunResult, keep bool, scratchDir string) any {
 	type checkJSON struct {
 		Kind     string `json:"kind"`
 		Target   string `json:"target"`
@@ -498,8 +522,17 @@ func runResultJSON(drill string, res orchestrate.RunResult) any {
 		Drill        string      `json:"drill"`
 		Status       string      `json:"status"`
 		LevelReached string      `json:"level_reached"`
+		KeptSandbox  string      `json:"kept_sandbox,omitempty"`
+		KeptScratch  string      `json:"kept_scratch,omitempty"`
 		Levels       []levelJSON `json:"levels"`
 	}{RunID: res.RunID, Drill: drill, Status: string(res.Status), LevelReached: res.LevelReached}
+	if keep {
+		out.KeptSandbox = res.KeptSandbox
+		scratch := filepath.Join(scratchDir, fmt.Sprintf("run-%d", res.RunID))
+		if _, err := os.Stat(scratch); err == nil {
+			out.KeptScratch = scratch
+		}
+	}
 	for _, l := range res.Levels {
 		lj := levelJSON{Level: l.Level, Status: l.Status, Summary: l.Summary}
 		for _, ev := range l.Evidence {

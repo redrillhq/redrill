@@ -24,7 +24,11 @@ func (p *pinExec) Describe() exec.ExecutorInfo { return exec.ExecutorInfo{Host: 
 
 func (p *pinExec) RunStep(_ context.Context, step exec.StepSpec) (exec.StepResult, error) {
 	p.pins = append(p.pins, step.Snapshot)
-	return exec.StepResult{Level: step.Level, Status: checks.Pass, Summary: "ok", Snapshot: "snap-A"}, nil
+	res := exec.StepResult{Level: step.Level, Status: checks.Pass, Summary: "ok", Snapshot: "snap-A"}
+	if step.Keep && step.Level == "l3" {
+		res.KeptSandbox = "sb-kept-1"
+	}
+	return res, nil
 }
 
 // Every level of a run must audit the same snapshot: the first level's
@@ -47,12 +51,15 @@ func TestRunPinsSnapshotAcrossLevels(t *testing.T) {
 	}
 	src := config.Source{Name: "s", Type: "dumpdir", Path: t.TempDir(), Pattern: "*.gz"}
 
-	res, err := o.Run(context.Background(), drill, src, RunOptions{Trigger: store.TriggerManual})
+	res, err := o.Run(context.Background(), drill, src, RunOptions{Trigger: store.TriggerManual, Keep: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if res.Status != store.ResultPass {
 		t.Fatalf("status = %s, want pass", res.Status)
+	}
+	if res.KeptSandbox != "sb-kept-1" {
+		t.Errorf("KeptSandbox = %q, want the executor-reported id threaded through", res.KeptSandbox)
 	}
 	want := []string{"", "snap-A", "snap-A"}
 	if len(pe.pins) != len(want) {

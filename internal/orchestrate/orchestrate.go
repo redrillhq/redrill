@@ -50,6 +50,9 @@ type RunOptions struct {
 	Level   string             // "" runs all configured levels in order; else only this one
 	Report  func(LevelOutcome) // optional, called per level
 	Scratch config.Scratch
+	// Keep leaves the L3 sandbox and scratch restore in place for forensics
+	// (`run --keep`, CLI-only); the next serve start reaps them.
+	Keep bool
 }
 
 // LevelOutcome is one level's result, for streaming and rendering.
@@ -65,6 +68,17 @@ type RunResult struct {
 	Status       store.Result // pass | fail | error
 	LevelReached string
 	Levels       []LevelOutcome
+	KeptSandbox  string // container id left running under RunOptions.Keep
+}
+
+// levelState accumulates the cross-level run state: the snapshot pin (one
+// snapshot per run), restored totals, and any sandbox kept for forensics.
+type levelState struct {
+	pin   string
+	pinAt time.Time
+	kept  string
+	bytes int64
+	files int
 }
 
 type leveled struct {
@@ -92,8 +106,6 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	}
 	result := RunResult{RunID: runID}
 
-	var bytesRestored int64
-	var filesRestored int
 	// Finalize even on the error path so a mid-run store failure or a canceled
 	// ctx never leaves a zombie run (result NULL). WithoutCancel lets cleanup
 	// persist after a timeout cancellation.
@@ -101,8 +113,7 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	// backup landing mid-run cannot split the audit across snapshots. Recorded
 	// on the run row (with the snapshot's own timestamp — the RPO input) so
 	// evidence still names the backup it tested after the source rotates.
-	pin := ""
-	var pinAt time.Time
+	var st levelState
 	finished := false
 	defer func() {
 		if finished {
@@ -111,9 +122,9 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 		end := o.now().UTC()
 		_ = o.store.FinishRun(context.WithoutCancel(ctx), store.Run{
 			ID: runID, Result: store.ResultError, LevelReached: result.LevelReached,
-			BytesRestored: bytesRestored, FilesRestored: int64(filesRestored),
+			BytesRestored: st.bytes, FilesRestored: int64(st.files),
 			DurationMS: end.Sub(start).Milliseconds(), FinishedAt: end,
-			Snapshot: pin, SnapshotTime: pinAt,
+			Snapshot: st.pin, SnapshotTime: st.pinAt,
 		})
 	}()
 
@@ -128,7 +139,7 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 
 	shortCircuit := false
 	for _, lv := range levels {
-		outcome, ran, err := o.runLevel(ctx, runID, drill, src, lv, start, shortCircuit, opts.Scratch, prevFileCount, &pin, &pinAt, &bytesRestored, &filesRestored)
+		outcome, ran, err := o.runLevel(ctx, runID, drill, src, lv, start, shortCircuit, opts, prevFileCount, &st)
 		if err != nil {
 			return RunResult{}, err
 		}
@@ -145,17 +156,18 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	}
 
 	result.Status = aggregateRun(result.Levels)
+	result.KeptSandbox = st.kept
 	end := o.now().UTC()
 	fin := store.Run{
 		ID:            runID,
 		Result:        result.Status,
 		LevelReached:  result.LevelReached,
-		BytesRestored: bytesRestored,
-		FilesRestored: int64(filesRestored),
+		BytesRestored: st.bytes,
+		FilesRestored: int64(st.files),
 		DurationMS:    end.Sub(start).Milliseconds(),
 		FinishedAt:    end,
-		Snapshot:      pin,
-		SnapshotTime:  pinAt,
+		Snapshot:      st.pin,
+		SnapshotTime:  st.pinAt,
 	}
 	// WithoutCancel so a run whose work completed keeps its real verdict even if
 	// ctx expired at the wire; the defer above is only the abnormal-path backstop.
@@ -165,7 +177,7 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	finished = true
 	// Best-effort housekeeping: the monotonic metrics counter (never changes a
 	// run's verdict).
-	if err := o.store.AddBytesRestored(context.WithoutCancel(ctx), drill.Name, bytesRestored); err != nil {
+	if err := o.store.AddBytesRestored(context.WithoutCancel(ctx), drill.Name, st.bytes); err != nil {
 		o.log.Warn("bytes counter update failed", "drill", drill.Name, "error", err.Error())
 	}
 	// Proofs advance only when the whole run passes (DESIGN §9.8) — a level that
@@ -200,7 +212,7 @@ func (o *Orchestrator) pruneRetention(ctx context.Context, drill config.Drill, n
 }
 
 // ran reports whether the level actually executed (vs. skipped).
-func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.Drill, src config.Source, lv leveled, start time.Time, shortCircuit bool, scratch config.Scratch, prevFileCount int, pin *string, pinAt *time.Time, bytes *int64, files *int) (LevelOutcome, bool, error) {
+func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.Drill, src config.Source, lv leveled, start time.Time, shortCircuit bool, opts RunOptions, prevFileCount int, st *levelState) (LevelOutcome, bool, error) {
 	// start is the run's logical clock (check evaluation, proof time); stepStart
 	// is this level's own start so per-level durations are real.
 	stepStart := o.now().UTC()
@@ -209,7 +221,7 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 		return out, false, o.recordStep(ctx, runID, out, stepStart)
 	}
 
-	res, err := o.exec.RunStep(ctx, o.buildStep(runID, drill, src, lv, start, scratch, prevFileCount, *pin))
+	res, err := o.exec.RunStep(ctx, o.buildStep(runID, drill, src, lv, start, opts, prevFileCount, st.pin))
 	switch {
 	case errors.Is(err, exec.ErrUnsupported):
 		out := LevelOutcome{Level: lv.name, Status: statusSkipped, Summary: "skipped (unsupported level/source combination)"}
@@ -223,8 +235,11 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 		return out, true, o.recordStep(ctx, runID, out, stepStart)
 	}
 
-	if *pin == "" && res.Snapshot != "" {
-		*pin, *pinAt = res.Snapshot, res.SnapshotTime
+	if st.pin == "" && res.Snapshot != "" {
+		st.pin, st.pinAt = res.Snapshot, res.SnapshotTime
+	}
+	if res.KeptSandbox != "" {
+		st.kept = res.KeptSandbox
 	}
 	out := LevelOutcome{Level: lv.name, Status: string(res.Status), Summary: res.Summary, Evidence: res.Evidence}
 	for _, ev := range res.Evidence {
@@ -239,8 +254,8 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 	if err := o.recordStep(ctx, runID, out, stepStart); err != nil {
 		return out, true, err
 	}
-	*bytes += res.Bytes
-	*files += res.Files
+	st.bytes += res.Bytes
+	st.files += res.Files
 	return out, true, nil
 }
 
@@ -255,10 +270,10 @@ func (o *Orchestrator) recordStep(ctx context.Context, runID int64, out LevelOut
 	return nil
 }
 
-func (o *Orchestrator) buildStep(runID int64, drill config.Drill, src config.Source, lv leveled, now time.Time, scratch config.Scratch, prevFileCount int, pin string) exec.StepSpec {
+func (o *Orchestrator) buildStep(runID int64, drill config.Drill, src config.Source, lv leveled, now time.Time, opts RunOptions, prevFileCount int, pin string) exec.StepSpec {
 	spec := exec.StepSpec{
 		RunID: runID, Drill: drill.Name, Level: lv.name, Source: src, Now: now,
-		Scratch: scratch, PrevFileCount: prevFileCount, Snapshot: pin,
+		Scratch: opts.Scratch, PrevFileCount: prevFileCount, Snapshot: pin, Keep: opts.Keep,
 	}
 	switch lv.name {
 	case "l1":

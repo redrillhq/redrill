@@ -26,6 +26,14 @@ func newScratch(base string, runID int64, maxBytes int64) (*scratch, error) {
 	return &scratch{root: root, maxBytes: maxBytes}, nil
 }
 
+// cleanupUnless skips cleanup when the step keeps its restore for forensics
+// (`run --keep`); kept dirs are reaped by the next serve start's scratch sweep.
+func (s *scratch) cleanupUnless(keep bool) {
+	if !keep {
+		s.cleanup()
+	}
+}
+
 // preflight refusal is error (the auditor declined), never fail.
 func (s *scratch) preflight(predicted int64) error {
 	if predicted < 0 {

@@ -51,6 +51,12 @@ type StepSpec struct {
 	// A pinned L2/L3 also skips the repo listing (restores are heavy; be
 	// frugal with IO).
 	Snapshot string `json:"snapshot,omitempty"`
+
+	// Keep leaves the L3 sandbox running and the scratch restore in place for
+	// human forensics (`run --keep`). Kept resources stay redrill-labeled, so
+	// the next serve start's janitor reaps them. Mount-mode L2 ignores Keep —
+	// an orphaned FUSE daemon is a leak, not a debugging aid.
+	Keep bool `json:"keep,omitempty"`
 }
 
 type StepResult struct {
@@ -64,6 +70,8 @@ type StepResult struct {
 	// SnapshotTime is the audited snapshot's own timestamp (zero = unknown,
 	// e.g. a pinned level that never listed the repo) — the RPO input.
 	SnapshotTime time.Time `json:"snapshot_time,omitzero"`
+	// KeptSandbox is the container id left running under StepSpec.Keep.
+	KeptSandbox string `json:"kept_sandbox,omitempty"`
 }
 
 type ExecutorInfo struct {
@@ -628,7 +636,7 @@ func (e *LocalExecutor) runBorgL2(ctx context.Context, step StepSpec) (StepResul
 	if err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	defer sc.cleanup()
+	defer sc.cleanupUnless(step.Keep)
 	if err := sc.preflight(predicted); err != nil {
 		return errorStep(res, err.Error()), nil
 	}
@@ -677,7 +685,7 @@ func (e *LocalExecutor) runResticL2(ctx context.Context, step StepSpec) (StepRes
 	if err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	defer sc.cleanup()
+	defer sc.cleanupUnless(step.Keep)
 	if err := sc.preflight(predicted); err != nil {
 		return errorStep(res, err.Error()), nil
 	}
@@ -731,7 +739,7 @@ func runDumpdirL2(ctx context.Context, step StepSpec) (StepResult, error) {
 	if err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	defer sc.cleanup()
+	defer sc.cleanupUnless(step.Keep)
 	if err := sc.preflight(predicted); err != nil {
 		return errorStep(res, err.Error()), nil
 	}

@@ -4,6 +4,7 @@
 package exec
 
 import (
+	"slices"
 	"sort"
 	"testing"
 
@@ -39,20 +40,8 @@ func TestCheckRegistriesMatchConfig(t *testing.T) {
 		if len(want) == 0 {
 			t.Fatalf("config.CheckKinds(%q) is empty — the catalog lost a level", tt.level)
 		}
-		if !equal(tt.builders, want) {
+		if !slices.Equal(tt.builders, want) {
 			t.Errorf("%s registries drifted:\n  config validates: %v\n  exec builds:      %v", tt.level, want, tt.builders)
 		}
 	}
-}
-
-func equal(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

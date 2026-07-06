@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -37,20 +38,11 @@ func (r *recordingBorg) repoListings() int {
 	defer r.mu.Unlock()
 	n := 0
 	for _, call := range r.calls {
-		if len(call) > 0 && call[0] == "list" && !contains(call, "--short") && !contains(call, "--json-lines") {
+		if len(call) > 0 && call[0] == "list" && !slices.Contains(call, "--short") && !slices.Contains(call, "--json-lines") {
 			n++
 		}
 	}
 	return n
-}
-
-func contains(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
 
 func borgL2Step(t *testing.T, snapshot string) StepSpec {
@@ -86,7 +78,7 @@ func TestBorgL2PinSkipsListing(t *testing.T) {
 	}
 	var extracted bool
 	for _, call := range f.calls {
-		if call[0] == "extract" && contains(call, "/r::pinned-arch") {
+		if call[0] == "extract" && slices.Contains(call, "/r::pinned-arch") {
 			extracted = true
 		}
 	}

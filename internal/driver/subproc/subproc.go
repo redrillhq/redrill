@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package subproc is the shared core for CLI-engine drivers: the process
-// runner, env assembly, and error formatting. A fix here reaches every
-// engine — the 2026-07-03 review's worst driver bug (a ctx kill misread as
-// an engine verdict) had to be fixed twice because this layer was duplicated.
+// runner, env assembly, error formatting, and restore measurement. A fix here
+// reaches every engine — the 2026-07-03 review's worst driver bug (a ctx kill
+// misread as an engine verdict) had to be fixed twice because this layer was
+// duplicated.
 package subproc
 
 import (

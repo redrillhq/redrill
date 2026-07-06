@@ -81,6 +81,7 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 	if msg != "" {
 		return errorStep(res, red.Redact(msg)), nil
 	}
+	res.Snapshot = archive // set before the error paths too, so forensics keep the pin
 	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
 	if err != nil {
 		return errorStep(res, err.Error()), nil
@@ -115,6 +116,7 @@ func (e *LocalExecutor) runResticL3(ctx context.Context, step StepSpec) (StepRes
 	if msg != "" {
 		return errorStep(res, red.Redact(msg)), nil
 	}
+	res.Snapshot = id // set before the error paths too, so forensics keep the pin
 	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
 	if err != nil {
 		return errorStep(res, err.Error()), nil
@@ -230,9 +232,8 @@ func sandboxEnv(cfg map[string]string) map[string]string {
 	return env
 }
 
-// l3Builders is the exec half of the check-kind registry; a registry test
-// pins it to config.CheckKinds("l3") so a kind that validates but cannot be
-// built fails CI instead of silently vanishing.
+// l3Builders is the exec half of the check-kind registry (rationale on
+// config's checkCatalog); the registry test pins it to config.CheckKinds("l3").
 var l3Builders = map[string]func(config.Check, string) checks.Check{
 	"sql": func(cc config.Check, db string) checks.Check {
 		if cc.SQL == nil {

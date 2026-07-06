@@ -53,7 +53,7 @@ type checkSpec struct {
 	levels        map[string]bool
 	unimplemented bool // in the DESIGN §7 catalog, not built yet
 	decode        func(*Check, *yaml.Node) error
-	validate      func(*Check, string, string, *errset) // (path, srcType)
+	validate      func(*Check, string, string, string, *errset) // (path, level, srcType)
 }
 
 var checkCatalog = map[string]checkSpec{
@@ -62,9 +62,10 @@ var checkCatalog = map[string]checkSpec{
 	checkCanaryFile: {levels: lvl("l2"), decode: decodePath, validate: needPath},
 	checkHashMatch: {levels: lvl("l2"),
 		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.HashMatch) },
-		validate: func(_ *Check, path, srcType string, es *errset) {
+		validate: func(_ *Check, path, level, srcType string, es *errset) {
 			// A dumpdir restore is a plain copy: nothing verifies restored bytes.
-			if srcType == "dumpdir" {
+			// Level-scoped so a misplaced hash_match gets only the placement error.
+			if level == "l2" && srcType == "dumpdir" {
 				es.add(path, "hash_match is not valid for a dumpdir source (nothing verifies restored bytes)")
 			}
 		}},
@@ -84,7 +85,7 @@ var checkCatalog = map[string]checkSpec{
 			c.SQL = &q
 			return err
 		},
-		validate: func(c *Check, path, _ string, es *errset) {
+		validate: func(c *Check, path, _, _ string, es *errset) {
 			if c.SQL == nil || c.SQL.Query == "" {
 				es.add(path, "sql requires a query")
 			}
@@ -94,7 +95,7 @@ var checkCatalog = map[string]checkSpec{
 		}},
 	checkSQLNoError: {levels: lvl("l3"),
 		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.SQLNoError) },
-		validate: func(c *Check, path, _ string, es *errset) {
+		validate: func(c *Check, path, _, _ string, es *errset) {
 			if c.SQLNoError == "" {
 				es.add(path, "sql_no_error requires a query")
 			}
@@ -115,7 +116,7 @@ func lvl(levels ...string) map[string]bool {
 
 func decodePath(c *Check, n *yaml.Node) error { return n.Decode(&c.Path) }
 
-func needPath(c *Check, path, _ string, es *errset) {
+func needPath(c *Check, path, _, _ string, es *errset) {
 	if c.Path == "" {
 		es.add(path, "%s requires a path", c.Kind)
 	}
@@ -160,7 +161,7 @@ func (c *Check) validate(path, level, srcType string, es *errset) {
 		es.add(path, "check %q is not valid at %s", c.Kind, strings.ToUpper(level))
 	}
 	if spec.validate != nil {
-		spec.validate(c, path, srcType, es)
+		spec.validate(c, path, level, srcType, es)
 	}
 }
 

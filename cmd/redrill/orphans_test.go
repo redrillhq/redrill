@@ -4,7 +4,7 @@
 package main
 
 import (
-	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/redrillhq/redrill/internal/config"
@@ -25,7 +25,7 @@ func TestOrphanedProofs(t *testing.T) {
 		{"all orphaned", []string{"a", "b"}, []string{"a", "b"}},
 		{"no proofs", nil, nil},
 	} {
-		if got := orphanedProofs(drills, tt.proofs); !reflect.DeepEqual(got, tt.want) {
+		if got := orphanedProofs(drills, tt.proofs); !slices.Equal(got, tt.want) {
 			t.Errorf("%s: got %v, want %v", tt.name, got, tt.want)
 		}
 	}

@@ -331,7 +331,7 @@ func (e *LocalExecutor) runBorgL1(ctx context.Context, step StepSpec) (StepResul
 		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, red))
 	}
 	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
-		evs, newest := borgArchiveChecks(ctx, d, l1, step.Now, red)
+		evs, newest := archiveChecks(ctx, d, d.ArchiveSize, l1, step.Now, red)
 		res.Evidence = append(res.Evidence, evs...)
 		res.Snapshot = newest // pin the rest of the run to the archive audited here
 	}
@@ -381,7 +381,7 @@ func (e *LocalExecutor) runResticL1(ctx context.Context, step StepSpec) (StepRes
 		res.Evidence = append(res.Evidence, nativeCheckEvidence(ctx, d, red))
 	}
 	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
-		evs, newest := resticSnapshotChecks(ctx, d, l1, step.Now, red)
+		evs, newest := archiveChecks(ctx, d, d.SnapshotSize, l1, step.Now, red)
 		res.Evidence = append(res.Evidence, evs...)
 		res.Snapshot = newest // pin the rest of the run to the snapshot audited here
 	}
@@ -432,21 +432,14 @@ func nativeCheckEvidence(ctx context.Context, d nativeChecker, red *redact.Redac
 	return ev
 }
 
-// borgArchiveChecks also reports the newest archive ID, the run's pin.
-func borgArchiveChecks(ctx context.Context, d *borg.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) ([]checks.Evidence, string) {
-	snaps, err := d.ListSnapshots(ctx)
-	if err != nil {
-		return listErrorEvidence(l1, red.Redact(err.Error())), ""
-	}
-	var newest string
-	if len(snaps) > 0 {
-		newest = snaps[0].ID
-	}
-	return snapshotAgeAndSize(ctx, snaps, l1, now, red, d.ArchiveSize), newest
+// snapshotLister is the slice of a SourceDriver the L1 snapshot checks need.
+type snapshotLister interface {
+	ListSnapshots(ctx context.Context) ([]driver.Snapshot, error)
 }
 
-// resticSnapshotChecks also reports the newest snapshot ID, the run's pin.
-func resticSnapshotChecks(ctx context.Context, d *restic.Driver, l1 *config.L1, now time.Time, red *redact.Redactor) ([]checks.Evidence, string) {
+// archiveChecks builds the engine-shared snapshot_max_age/size_anomaly
+// evidence and reports the newest snapshot ID, the run's pin.
+func archiveChecks(ctx context.Context, d snapshotLister, sizeFn func(context.Context, string) (int64, error), l1 *config.L1, now time.Time, red *redact.Redactor) ([]checks.Evidence, string) {
 	snaps, err := d.ListSnapshots(ctx)
 	if err != nil {
 		return listErrorEvidence(l1, red.Redact(err.Error())), ""
@@ -455,7 +448,7 @@ func resticSnapshotChecks(ctx context.Context, d *restic.Driver, l1 *config.L1, 
 	if len(snaps) > 0 {
 		newest = snaps[0].ID
 	}
-	return snapshotAgeAndSize(ctx, snaps, l1, now, red, d.SnapshotSize), newest
+	return snapshotAgeAndSize(ctx, snaps, l1, now, red, sizeFn), newest
 }
 
 // listErrorEvidence attributes a snapshot-listing failure to every configured
@@ -771,9 +764,8 @@ type l2Aggregates struct {
 	Prev   int
 }
 
-// l2Builders is the exec half of the check-kind registry; a registry test
-// pins it to config.CheckKinds("l2") so a kind that validates but cannot be
-// built fails CI instead of silently vanishing.
+// l2Builders is the exec half of the check-kind registry (rationale on
+// config's checkCatalog); the registry test pins it to config.CheckKinds("l2").
 var l2Builders = map[string]func(config.Check, l2Aggregates) checks.Check{
 	"path_exists": func(cc config.Check, _ l2Aggregates) checks.Check { return checks.PathExists{Path: cc.Path} },
 	"path_absent": func(cc config.Check, _ l2Aggregates) checks.Check { return checks.PathAbsent{Path: cc.Path} },

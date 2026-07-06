@@ -165,3 +165,23 @@ func TestSabotageVersionTrap(t *testing.T) {
 	mustFail(t, res, "version-trap")
 	assertCaught(t, res, "load")
 }
+
+// tcp-dead-service (dumpdir L3 tcp): the "service answers" probe must fail
+// when nothing listens on the asserted port; the near-pass mirror is the same
+// sandbox answering on the port postgres actually serves.
+func TestSabotageTCPDeadService(t *testing.T) {
+	rt := requireDocker(t)
+	dir := fixtures.Dump(t, fixtures.DumpBody("CREATE TABLE users(id int);\nINSERT INTO users VALUES (1);\n"))
+	res := runL3Drill(t, rt, dir, pgImage(), []config.Check{
+		{Kind: "tcp", TCPPort: 5433}, // nothing listens there
+	})
+	mustFail(t, res, "tcp-dead-service")
+	assertCaught(t, res, "tcp")
+
+	res = runL3Drill(t, rt, dir, pgImage(), []config.Check{
+		{Kind: "tcp", TCPPort: 5432},
+	})
+	if res.Status != store.ResultPass {
+		t.Fatalf("tcp near-pass = %s, want pass; levels = %+v", res.Status, res.Levels)
+	}
+}

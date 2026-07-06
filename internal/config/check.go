@@ -25,6 +25,7 @@ type Check struct {
 	SQLNoError            string
 	Exec                  string
 	FileCount             *FileCountCheck
+	TCPPort               int
 }
 
 type SQLCheck struct {
@@ -52,6 +53,7 @@ const (
 	checkSQLNoError       = "sql_no_error"
 	checkExec             = "exec"
 	checkFileCount        = "file_count"
+	checkTCP              = "tcp"
 )
 
 // checkSpec is one row of the check-kind catalog: where the kind may appear
@@ -130,6 +132,15 @@ var checkCatalog = map[string]checkSpec{
 		validate: func(c *Check, path, _, _ string, es *errset) {
 			if c.SQLNoError == "" {
 				es.add(path, "sql_no_error requires a query")
+			}
+		}},
+	// tcp is the generic "service answers" probe, run inside the sandbox
+	// (network=none blocks probing from outside): connection refused = fail.
+	checkTCP: {levels: lvl("l3"),
+		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.TCPPort) },
+		validate: func(c *Check, path, _, _ string, es *errset) {
+			if c.TCPPort < 1 || c.TCPPort > 65535 {
+				es.add(path, "tcp requires a port in 1..65535, got %d", c.TCPPort)
 			}
 		}},
 	// exec is the escape hatch: an operator-authored command, run in the

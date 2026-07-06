@@ -247,6 +247,7 @@ var l3Builders = map[string]func(config.Check, string) checks.Check{
 		return checks.SQLNoError{Query: cc.SQLNoError, DB: db}
 	},
 	"exec": func(cc config.Check, _ string) checks.Check { return checks.ExecSandbox{Command: cc.Exec} },
+	"tcp":  func(cc config.Check, _ string) checks.Check { return checks.TCPPort{Port: cc.TCPPort} },
 }
 
 func buildL3Check(cc config.Check, db string) checks.Check {

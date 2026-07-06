@@ -256,6 +256,17 @@ var contractCases = []contractCase{
 	{kind: kindFileCount, name: "unreadable-restore/error", want: Error, build: func(t *testing.T) (Check, CheckEnv) {
 		return FileCount{Glob: "*.jpg", Expect: "> 0"}, CheckEnv{RestoreDir: filepath.Join(t.TempDir(), "gone"), Now: now}
 	}},
+
+	// --- tcp: the generic "service answers" probe ---
+	{kind: kindTCP, name: "connection-refused/fail", want: Fail, build: func(_ *testing.T) (Check, CheckEnv) {
+		return TCPPort{Port: 5432}, CheckEnv{Sandbox: fakeSandbox{exit: 1}, Now: now}
+	}},
+	{kind: kindTCP, name: "listening/pass", want: Pass, actualHas: "connected", build: func(_ *testing.T) (Check, CheckEnv) {
+		return TCPPort{Port: 5432}, CheckEnv{Sandbox: fakeSandbox{exit: 0}, Now: now}
+	}},
+	{kind: kindTCP, name: "exec-transport/error", want: Error, build: func(_ *testing.T) (Check, CheckEnv) {
+		return TCPPort{Port: 5432}, CheckEnv{Sandbox: fakeSandbox{err: errExecTransport}, Now: now}
+	}},
 }
 
 var errExecTransport = errors.New("container gone")
@@ -296,7 +307,7 @@ func TestContractCoversEveryKind(t *testing.T) {
 		kindSnapshotMaxAge, kindSizeAnomaly,
 		kindPathExists, kindPathAbsent, kindCanaryFile, kindHashMatch,
 		kindNewestFileMaxAge, kindMinTotalBytes, kindFileCountTolerance,
-		kindSQL, kindSQLNoError, kindExec, kindFileCount,
+		kindSQL, kindSQLNoError, kindExec, kindFileCount, kindTCP,
 	}
 	advisory := map[string]bool{kindSizeAnomaly: true} // always passes; no fail direction
 

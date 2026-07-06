@@ -99,9 +99,10 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 	// persist after a timeout cancellation.
 	// One snapshot per run: the first level to resolve one pins the rest, so a
 	// backup landing mid-run cannot split the audit across snapshots. Recorded
-	// on the run row so evidence still names the backup it tested after the
-	// source rotates.
+	// on the run row (with the snapshot's own timestamp — the RPO input) so
+	// evidence still names the backup it tested after the source rotates.
 	pin := ""
+	var pinAt time.Time
 	finished := false
 	defer func() {
 		if finished {
@@ -111,7 +112,8 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 		_ = o.store.FinishRun(context.WithoutCancel(ctx), store.Run{
 			ID: runID, Result: store.ResultError, LevelReached: result.LevelReached,
 			BytesRestored: bytesRestored, FilesRestored: int64(filesRestored),
-			DurationMS: end.Sub(start).Milliseconds(), FinishedAt: end, Snapshot: pin,
+			DurationMS: end.Sub(start).Milliseconds(), FinishedAt: end,
+			Snapshot: pin, SnapshotTime: pinAt,
 		})
 	}()
 
@@ -126,7 +128,7 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 
 	shortCircuit := false
 	for _, lv := range levels {
-		outcome, ran, err := o.runLevel(ctx, runID, drill, src, lv, start, shortCircuit, opts.Scratch, prevFileCount, &pin, &bytesRestored, &filesRestored)
+		outcome, ran, err := o.runLevel(ctx, runID, drill, src, lv, start, shortCircuit, opts.Scratch, prevFileCount, &pin, &pinAt, &bytesRestored, &filesRestored)
 		if err != nil {
 			return RunResult{}, err
 		}
@@ -153,6 +155,7 @@ func (o *Orchestrator) Run(ctx context.Context, drill config.Drill, src config.S
 		DurationMS:    end.Sub(start).Milliseconds(),
 		FinishedAt:    end,
 		Snapshot:      pin,
+		SnapshotTime:  pinAt,
 	}
 	// WithoutCancel so a run whose work completed keeps its real verdict even if
 	// ctx expired at the wire; the defer above is only the abnormal-path backstop.
@@ -197,7 +200,7 @@ func (o *Orchestrator) pruneRetention(ctx context.Context, drill config.Drill, n
 }
 
 // ran reports whether the level actually executed (vs. skipped).
-func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.Drill, src config.Source, lv leveled, start time.Time, shortCircuit bool, scratch config.Scratch, prevFileCount int, pin *string, bytes *int64, files *int) (LevelOutcome, bool, error) {
+func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.Drill, src config.Source, lv leveled, start time.Time, shortCircuit bool, scratch config.Scratch, prevFileCount int, pin *string, pinAt *time.Time, bytes *int64, files *int) (LevelOutcome, bool, error) {
 	// start is the run's logical clock (check evaluation, proof time); stepStart
 	// is this level's own start so per-level durations are real.
 	stepStart := o.now().UTC()
@@ -221,7 +224,7 @@ func (o *Orchestrator) runLevel(ctx context.Context, runID int64, drill config.D
 	}
 
 	if *pin == "" && res.Snapshot != "" {
-		*pin = res.Snapshot
+		*pin, *pinAt = res.Snapshot, res.SnapshotTime
 	}
 	out := LevelOutcome{Level: lv.name, Status: string(res.Status), Summary: res.Summary, Evidence: res.Evidence}
 	for _, ev := range res.Evidence {

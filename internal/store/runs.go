@@ -14,7 +14,7 @@ import (
 // scanner is the common surface of *sql.Row and *sql.Rows.
 type scanner interface{ Scan(dest ...any) error }
 
-const runColumns = `id, drill, "trigger", started_at, finished_at, result, level_reached, bytes_restored, files_restored, duration_ms, executor, snapshot`
+const runColumns = `id, drill, "trigger", started_at, finished_at, result, level_reached, bytes_restored, files_restored, duration_ms, executor, snapshot, snapshot_time`
 
 const (
 	runByID       = `SELECT ` + runColumns + ` FROM runs WHERE id = ?`
@@ -60,9 +60,9 @@ func (s *Store) FinishRun(ctx context.Context, r Run) error {
 		return fmt.Errorf("finish run: id required")
 	}
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE runs SET finished_at = ?, result = ?, level_reached = ?, bytes_restored = ?, files_restored = ?, duration_ms = ?, snapshot = ?
+		UPDATE runs SET finished_at = ?, result = ?, level_reached = ?, bytes_restored = ?, files_restored = ?, duration_ms = ?, snapshot = ?, snapshot_time = ?
 		WHERE id = ? AND result IS NULL`,
-		nullTime(r.FinishedAt), nullResult(r.Result), r.LevelReached, r.BytesRestored, r.FilesRestored, r.DurationMS, r.Snapshot, r.ID)
+		nullTime(r.FinishedAt), nullResult(r.Result), r.LevelReached, r.BytesRestored, r.FilesRestored, r.DurationMS, r.Snapshot, nullTime(r.SnapshotTime), r.ID)
 	if err != nil {
 		return fmt.Errorf("finish run %d: %w", r.ID, err)
 	}
@@ -152,6 +152,20 @@ func (s *Store) MarkAbandonedRuns(ctx context.Context, now time.Time) (int64, er
 
 // LatestFinishedRun returns a drill's most recent run with a recorded verdict
 // (any of pass/fail/error), ok=false if none. An unfinished run is skipped.
+// LatestPassingRun returns the drill's newest passing run — the last proven
+// restore, whose duration and snapshot age are the RTO/RPO metrics.
+func (s *Store) LatestPassingRun(ctx context.Context, drill string) (Run, bool, error) {
+	q := `SELECT ` + runColumns + ` FROM runs WHERE drill = ? AND result = 'pass' ORDER BY id DESC LIMIT 1`
+	r, err := scanRun(s.db.QueryRowContext(ctx, q, drill))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, false, nil
+	}
+	if err != nil {
+		return Run{}, false, fmt.Errorf("latest passing run for %s: %w", drill, err)
+	}
+	return r, true, nil
+}
+
 func (s *Store) LatestFinishedRun(ctx context.Context, drill string) (Run, bool, error) {
 	q := `SELECT ` + runColumns + ` FROM runs WHERE drill = ? AND result IS NOT NULL ORDER BY id DESC LIMIT 1`
 	r, err := scanRun(s.db.QueryRowContext(ctx, q, drill))
@@ -203,15 +217,17 @@ func scanRun(sc scanner) (Run, error) {
 		started  int64
 		finished sql.NullInt64
 		result   sql.NullString
+		snapTime sql.NullInt64
 	)
 	if err := sc.Scan(&r.ID, &r.Drill, &trigger, &started, &finished, &result,
-		&r.LevelReached, &r.BytesRestored, &r.FilesRestored, &r.DurationMS, &r.Executor, &r.Snapshot); err != nil {
+		&r.LevelReached, &r.BytesRestored, &r.FilesRestored, &r.DurationMS, &r.Executor, &r.Snapshot, &snapTime); err != nil {
 		return Run{}, err
 	}
 	r.Trigger = Trigger(trigger)
 	r.StartedAt = timeFromUnixNano(started)
 	r.FinishedAt = timeFromNull(finished)
 	r.Result = Result(result.String)
+	r.SnapshotTime = timeFromNull(snapTime)
 	return r, nil
 }
 

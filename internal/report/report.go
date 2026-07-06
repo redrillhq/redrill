@@ -51,7 +51,8 @@ type Run struct {
 	DurationMS    int64      `json:"duration_ms"`
 	BytesRestored int64      `json:"bytes_restored"`
 	FilesRestored int64      `json:"files_restored"`
-	Snapshot      string     `json:"snapshot,omitempty"` // the snapshot/dump the run audited
+	Snapshot      string     `json:"snapshot,omitempty"`     // the snapshot/dump the run audited
+	SnapshotTime  time.Time  `json:"snapshot_time,omitzero"` // its own timestamp; zero = unknown
 	Steps         []Step     `json:"steps,omitempty"`
 	Evidence      []Evidence `json:"evidence,omitempty"`
 }
@@ -131,6 +132,7 @@ func buildRun(ctx context.Context, st *store.Store, run store.Run) (Run, error) 
 		BytesRestored: run.BytesRestored,
 		FilesRestored: run.FilesRestored,
 		Snapshot:      run.Snapshot,
+		SnapshotTime:  run.SnapshotTime,
 	}
 	steps, err := st.ListSteps(ctx, run.ID)
 	if err != nil {

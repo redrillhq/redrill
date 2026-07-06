@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,7 +212,29 @@ var contractCases = []contractCase{
 	{kind: kindSQLNoError, name: "query-ok/pass", want: Pass, build: func(_ *testing.T) (Check, CheckEnv) {
 		return SQLNoError{Query: "select * from orders limit 1"}, CheckEnv{Sandbox: fakeSandbox{exit: 0}, Now: now}
 	}},
+
+	// --- exec, the escape hatch: exit code = verdict, in both habitats ---
+	{kind: kindExec, name: "script-nonzero/fail", want: Fail, actualHas: "exit 3", build: func(t *testing.T) (Check, CheckEnv) {
+		return ExecScript{Command: "exit 3"}, CheckEnv{RestoreDir: t.TempDir(), Now: now}
+	}},
+	{kind: kindExec, name: "script-zero/pass", want: Pass, actualHas: "exit 0", build: func(t *testing.T) (Check, CheckEnv) {
+		return ExecScript{Command: "test -n \"$REDRILL_RESTORE_DIR\""}, CheckEnv{RestoreDir: t.TempDir(), Now: now}
+	}},
+	{kind: kindExec, name: "script-asserts-restored-file/fail", want: Fail, build: func(t *testing.T) (Check, CheckEnv) {
+		return ExecScript{Command: "test -s data.sql"}, CheckEnv{RestoreDir: t.TempDir(), Now: now} // empty restore dir: the file is absent
+	}},
+	{kind: kindExec, name: "sandbox-nonzero/fail", want: Fail, build: func(_ *testing.T) (Check, CheckEnv) {
+		return ExecSandbox{Command: "verify_rows"}, CheckEnv{Sandbox: fakeSandbox{exit: 2}, Now: now}
+	}},
+	{kind: kindExec, name: "sandbox-zero/pass", want: Pass, build: func(_ *testing.T) (Check, CheckEnv) {
+		return ExecSandbox{Command: "verify_rows"}, CheckEnv{Sandbox: fakeSandbox{out: "ok", exit: 0}, Now: now}
+	}},
+	{kind: kindExec, name: "sandbox-transport/error", want: Error, build: func(_ *testing.T) (Check, CheckEnv) {
+		return ExecSandbox{Command: "verify_rows"}, CheckEnv{Sandbox: fakeSandbox{err: errExecTransport}, Now: now}
+	}},
 }
+
+var errExecTransport = errors.New("container gone")
 
 func TestContract(t *testing.T) {
 	t.Parallel()
@@ -249,7 +272,7 @@ func TestContractCoversEveryKind(t *testing.T) {
 		kindSnapshotMaxAge, kindSizeAnomaly,
 		kindPathExists, kindPathAbsent, kindCanaryFile, kindHashMatch,
 		kindNewestFileMaxAge, kindMinTotalBytes, kindFileCountTolerance,
-		kindSQL, kindSQLNoError,
+		kindSQL, kindSQLNoError, kindExec,
 	}
 	advisory := map[string]bool{kindSizeAnomaly: true} // always passes; no fail direction
 

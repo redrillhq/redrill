@@ -82,7 +82,10 @@ exposed instance with TLS (see the [reverse-proxy recipes](../../deploy/README.m
 A drill processes whatever the backup contains. L2 extraction happens inside
 a per-run scratch directory with a size quota and preflight; L3 loads the
 restored dump inside the network-less sandbox, and SQL assertions execute in
-that container, not on the host. The residual risk is the engines' own
+that container, not on the host. The `exec` check runs operator-authored
+commands (on the host at L2, in the sandbox at L3) — the config is the trust
+boundary, so an `exec` script deserves the same review care as the config
+file that names it. The residual risk is the engines' own
 extraction code — restoring is inherently parsing untrusted archives with
 borg/restic/psql. Keep engines within the tested version bands (`redrill
 doctor` warns outside them) and patched.

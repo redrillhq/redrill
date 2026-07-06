@@ -14,6 +14,8 @@ Generated 2026-07-04 09:00 UTC.
 
 Audited snapshot: `app-db-2026-07-01.sql.gz`
 
+Proven RTO 12.3s · RPO 26h (snapshot age at proof)
+
 | Level | Status | Duration | Summary |
 |---|---|---|---|
 | l1 | PASS | 400ms | 3 checks passed |

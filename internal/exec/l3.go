@@ -43,18 +43,18 @@ func (e *LocalExecutor) runDumpdirL3(ctx context.Context, step StepSpec) (StepRe
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	id, msg := resolveSnapshot(ctx, step, d.ListSnapshots,
+	snap, msg := resolveSnapshot(ctx, step, d.ListSnapshots,
 		fmt.Sprintf("no files match %q in %s", step.Source.Pattern, step.Source.Path))
 	if msg != "" {
 		return errorStep(res, msg), nil
 	}
-	res.Snapshot = id
+	res.Snapshot, res.SnapshotTime = snap.ID, snap.Time
 	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
 	if err != nil {
 		return errorStep(res, err.Error()), nil
 	}
 	defer sc.cleanup()
-	return e.loadAndCheck(ctx, step, sc, d.Path(id), red, id)
+	return e.loadAndCheck(ctx, step, sc, d.Path(snap.ID), red, snap)
 }
 
 func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResult, error) {
@@ -77,11 +77,12 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	archive, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no archives in repository")
+	snap, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no archives in repository")
 	if msg != "" {
 		return errorStep(res, red.Redact(msg)), nil
 	}
-	res.Snapshot = archive // set before the error paths too, so forensics keep the pin
+	// Set before the error paths too, so forensics keep the pin.
+	res.Snapshot, res.SnapshotTime = snap.ID, snap.Time
 	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
 	if err != nil {
 		return errorStep(res, err.Error()), nil
@@ -91,10 +92,10 @@ func (e *LocalExecutor) runBorgL3(ctx context.Context, step StepSpec) (StepResul
 	if err := os.MkdirAll(extractDir, 0o700); err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{archive}, Paths: []string{step.L3.ExtractPath}}, extractDir); err != nil {
+	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{snap.ID}, Paths: []string{step.L3.ExtractPath}}, extractDir); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red, archive)
+	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red, snap)
 }
 
 func (e *LocalExecutor) runResticL3(ctx context.Context, step StepSpec) (StepResult, error) {
@@ -112,11 +113,12 @@ func (e *LocalExecutor) runResticL3(ctx context.Context, step StepSpec) (StepRes
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	id, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no snapshots in repository")
+	snap, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no snapshots in repository")
 	if msg != "" {
 		return errorStep(res, red.Redact(msg)), nil
 	}
-	res.Snapshot = id // set before the error paths too, so forensics keep the pin
+	// Set before the error paths too, so forensics keep the pin.
+	res.Snapshot, res.SnapshotTime = snap.ID, snap.Time
 	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
 	if err != nil {
 		return errorStep(res, err.Error()), nil
@@ -126,14 +128,14 @@ func (e *LocalExecutor) runResticL3(ctx context.Context, step StepSpec) (StepRes
 	if err := os.MkdirAll(extractDir, 0o700); err != nil {
 		return errorStep(res, err.Error()), nil
 	}
-	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{id}, Paths: []string{step.L3.ExtractPath}}, extractDir); err != nil {
+	if _, err := d.Restore(ctx, driver.Selection{SnapshotIDs: []string{snap.ID}, Paths: []string{step.L3.ExtractPath}}, extractDir); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red, id)
+	return e.loadAndCheck(ctx, step, sc, filepath.Join(extractDir, step.L3.ExtractPath), red, snap)
 }
 
-func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scratch, dumpSrc string, red *redact.Redactor, snapshot string) (StepResult, error) {
-	res := StepResult{Level: step.Level, Snapshot: snapshot}
+func (e *LocalExecutor) loadAndCheck(ctx context.Context, step StepSpec, sc *scratch, dumpSrc string, red *redact.Redactor, snap driver.Snapshot) (StepResult, error) {
+	res := StepResult{Level: step.Level, Snapshot: snap.ID, SnapshotTime: snap.Time}
 	l3 := step.L3
 	loaded, format, err := stageDump(dumpSrc, sc.root, sc.maxBytes)
 	if err != nil {
@@ -244,6 +246,7 @@ var l3Builders = map[string]func(config.Check, string) checks.Check{
 	"sql_no_error": func(cc config.Check, db string) checks.Check {
 		return checks.SQLNoError{Query: cc.SQLNoError, DB: db}
 	},
+	"exec": func(cc config.Check, _ string) checks.Check { return checks.ExecSandbox{Command: cc.Exec} },
 }
 
 func buildL3Check(cc config.Check, db string) checks.Check {

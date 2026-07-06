@@ -79,7 +79,7 @@ func seedStore(t *testing.T) *store.Store {
 	mustFinish(t, st, store.Run{
 		ID: id, FinishedAt: passFinish, Result: store.ResultPass, LevelReached: "l3",
 		BytesRestored: 52428800, FilesRestored: 240, DurationMS: 12300,
-		Snapshot: "app-db-2026-07-01.sql.gz",
+		Snapshot: "app-db-2026-07-01.sql.gz", SnapshotTime: passFinish.Add(-26 * time.Hour),
 	})
 	mustStep(t, st, store.RunStep{RunID: id, Kind: "l1", StartedAt: start, FinishedAt: start.Add(400 * time.Millisecond), Status: "pass", Summary: "3 checks passed"})
 	mustStep(t, st, store.RunStep{RunID: id, Kind: "l3", StartedAt: start.Add(400 * time.Millisecond), FinishedAt: passFinish, Status: "pass", Summary: "sandbox booted, 1 check passed"})

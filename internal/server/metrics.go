@@ -41,7 +41,8 @@ type metricFamily struct {
 
 func (s *Server) gatherMetrics(ctx context.Context) []metricFamily {
 	now := s.now()
-	var lastProven, slaOK, runResult, runDuration, bytesRestored []labeledValue
+	var lastProven, slaOK, runResult, runDuration, bytesRestored, rto, rpo []labeledValue
+	okCount := 0
 
 	for i := range s.cfg.Drills {
 		d := &s.cfg.Drills[i]
@@ -67,6 +68,26 @@ func (s *Server) gatherMetrics(ctx context.Context) []metricFamily {
 		}
 		stale := scheduler.Stale(d.MaxProofAge.Duration(), provenAt, now)
 		slaOK = append(slaOK, labeledValue{labels: drillLabel, value: boolVal(!stale)})
+		if !stale {
+			okCount++
+		}
+
+		// RTO/RPO describe the last *proven* restore: how long the restore took,
+		// and how old the audited snapshot's data was when it was proven.
+		if last, ok, err := s.store.LatestPassingRun(ctx, d.Name); err != nil {
+			s.log.Warn("metrics: latest passing run", "drill", d.Name, "error", err.Error())
+		} else if ok {
+			rto = append(rto, labeledValue{
+				labels: drillLabel,
+				value:  strconv.FormatFloat(float64(last.DurationMS)/1000, 'f', -1, 64),
+			})
+			if !last.SnapshotTime.IsZero() {
+				rpo = append(rpo, labeledValue{
+					labels: drillLabel,
+					value:  strconv.FormatFloat(last.FinishedAt.Sub(last.SnapshotTime).Seconds(), 'f', -1, 64),
+				})
+			}
+		}
 
 		if last, ok, err := s.store.LatestFinishedRun(ctx, d.Name); err != nil {
 			s.log.Warn("metrics: latest run", "drill", d.Name, "error", err.Error())
@@ -94,11 +115,19 @@ func (s *Server) gatherMetrics(ctx context.Context) []metricFamily {
 
 	scratch := labeledValue{value: strconv.FormatInt(dirSize(s.cfg.Scratch.Dir), 10)}
 
+	var ratio []labeledValue
+	if n := len(s.cfg.Drills); n > 0 {
+		ratio = append(ratio, labeledValue{value: strconv.FormatFloat(float64(okCount)/float64(n), 'f', -1, 64)})
+	}
+
 	return []metricFamily{
 		{"redrill_last_proven_timestamp_seconds", "Unix time of the last fully-passing run, per drill and level.", "gauge", lastProven},
 		{"redrill_proof_sla_ok", "1 if the drill's headline proof is within its max_proof_age, else 0.", "gauge", slaOK},
+		{"redrill_datasets_proven_ratio", "Fraction of configured drills whose headline proof is within its max_proof_age.", "gauge", ratio},
 		{"redrill_run_result", "Latest finished run's result per drill (1 for the current result, else 0).", "gauge", runResult},
 		{"redrill_run_duration_seconds", "Latest finished run's wall-clock duration in seconds, per drill.", "gauge", runDuration},
+		{"redrill_rto_seconds", "Wall-clock duration of the last passing run, per drill — the proven restore time.", "gauge", rto},
+		{"redrill_rpo_seconds", "Age of the audited snapshot at the moment of the last passing run, per drill — the proven recovery point.", "gauge", rpo},
 		{"redrill_bytes_restored_total", "Total bytes restored across a drill's runs.", "counter", bytesRestored},
 		{"redrill_scratch_used_bytes", "Bytes currently used under the scratch directory.", "gauge", []labeledValue{scratch}},
 	}

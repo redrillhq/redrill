@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/redrillhq/redrill/internal/config"
 	"github.com/redrillhq/redrill/internal/fixtures"
+	"github.com/redrillhq/redrill/internal/store"
 )
 
 // Broadened sabotage corpus (beyond the canonical six in sabotage_test.go):
@@ -56,4 +58,39 @@ func TestSabotageMagicMismatch(t *testing.T) {
 	res := runCorpusFail(t, fixtures.ZstdBytes(t, "SELECT 1; -- compressed with the wrong tool"))
 	mustFail(t, res, "magic-mismatch")
 	assertCaught(t, res, "compression_test")
+}
+
+// execL2 is an L2 drill whose only assertion is the operator-script escape
+// hatch: the restored dump must be non-empty.
+func execL2() config.Levels {
+	return config.Levels{L2: &config.L2{
+		Restore: config.Restore{Scope: "full"},
+		Checks:  []config.Check{{Kind: "exec", Exec: `set -- *.sql.gz; test -s "$1"`}},
+	}}
+}
+
+// exec-dead-restore: the escape-hatch check kind must catch a dead backup like
+// any built-in (invariant #5: every check kind ships a sabotage fixture). A
+// 0-byte dump with a plausible name and fresh mtime restores at L2; the
+// operator script asserts it non-empty and its exit code is the verdict.
+func TestSabotageExecCheck(t *testing.T) {
+	t.Parallel()
+	dir := fixtures.Dump(t, fixtures.DumpRaw(nil))
+	st := newStore(t)
+	drill, src := drillFor(dir, execL2())
+	res := runDrill(t, st, drill, src, RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
+	mustFail(t, res, "exec-dead-restore")
+	assertCaught(t, res, "exec")
+}
+
+// The cry-wolf mirror: a healthy restore must pass the same script.
+func TestExecCheckNearPass(t *testing.T) {
+	t.Parallel()
+	dir := fixtures.Dump(t)
+	st := newStore(t)
+	drill, src := drillFor(dir, execL2())
+	res := runDrill(t, st, drill, src, RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
+	if res.Status != store.ResultPass {
+		t.Fatalf("healthy exec drill = %s, want pass; levels = %+v", res.Status, res.Levels)
+	}
 }

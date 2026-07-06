@@ -37,6 +37,8 @@ ul { margin: .25rem 0; padding-left: 1.25rem; }
 <h3>Last run — <span class="status-pass">PASS (run 1, schedule, 3d ago, 12.3s, 50 MiB / 240 files restored)</span></h3>
 <p class="muted">Audited snapshot: app-db-2026-07-01.sql.gz</p>
 
+<p class="muted">Proven RTO 12.3s · RPO 26h (snapshot age at proof)</p>
+
 
 <table>
 <tr><th>Level</th><th>Status</th><th>Duration</th><th>Summary</th></tr>
@@ -74,6 +76,7 @@ ul { margin: .25rem 0; padding-left: 1.25rem; }
 
 <h3>Last run — <span class="status-fail">FAIL (run 2, schedule, 1h ago, 700ms)</span></h3>
 <p class="muted">Audited snapshot: wiki-2026-07-04.sql.gz</p>
+
 
 
 <table>

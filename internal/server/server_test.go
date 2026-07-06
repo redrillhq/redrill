@@ -66,7 +66,8 @@ func seedFinishedRun(t *testing.T, st *store.Store, drill string, result store.R
 	}
 	if err := st.FinishRun(ctx, store.Run{
 		ID: id, Result: result, LevelReached: "l1", BytesRestored: 1000, FilesRestored: 5,
-		DurationMS: 1500, FinishedAt: at.Add(2 * time.Second), Snapshot: "snap-9",
+		DurationMS: 1500, FinishedAt: at.Add(2 * time.Second),
+		Snapshot: "snap-9", SnapshotTime: at.Add(-24 * time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}

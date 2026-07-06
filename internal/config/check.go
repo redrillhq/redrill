@@ -100,10 +100,15 @@ var checkCatalog = map[string]checkSpec{
 				es.add(path, "sql_no_error requires a query")
 			}
 		}},
-	// exec is in the DESIGN §7 catalog but unimplemented; accepting it would
-	// silently run zero assertions (a level could pass while checking nothing).
-	checkExec: {levels: lvl("l2", "l3"), unimplemented: true,
-		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.Exec) }},
+	// exec is the escape hatch: an operator-authored command, run in the
+	// restored tree at L2 or inside the sandbox at L3; exit code = verdict.
+	checkExec: {levels: lvl("l2", "l3"),
+		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.Exec) },
+		validate: func(c *Check, path, _, _ string, es *errset) {
+			if c.Exec == "" {
+				es.add(path, "exec requires a command")
+			}
+		}},
 }
 
 func lvl(levels ...string) map[string]bool {

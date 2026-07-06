@@ -61,6 +61,9 @@ type StepResult struct {
 	Files    int               `json:"files"`
 	Bytes    int64             `json:"bytes"`
 	Snapshot string            `json:"snapshot,omitempty"` // the snapshot/dump this level audited
+	// SnapshotTime is the audited snapshot's own timestamp (zero = unknown,
+	// e.g. a pinned level that never listed the repo) — the RPO input.
+	SnapshotTime time.Time `json:"snapshot_time,omitzero"`
 }
 
 type ExecutorInfo struct {
@@ -215,7 +218,8 @@ func runDumpdirL1(ctx context.Context, step StepSpec) (StepResult, error) {
 	if len(snaps) == 0 {
 		return errorStep(res, fmt.Sprintf("no files match %q in %s", step.Source.Pattern, step.Source.Path)), nil
 	}
-	res.Snapshot = snaps[0].ID // pin the rest of the run to the dump audited here
+	// Pin the rest of the run to the dump audited here.
+	res.Snapshot, res.SnapshotTime = snaps[0].ID, snaps[0].Time
 
 	selected := snaps[:1]
 	if step.Source.Pick == "all-matching-window" {
@@ -333,7 +337,8 @@ func (e *LocalExecutor) runBorgL1(ctx context.Context, step StepSpec) (StepResul
 	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
 		evs, newest := archiveChecks(ctx, d, d.ArchiveSize, l1, step.Now, red)
 		res.Evidence = append(res.Evidence, evs...)
-		res.Snapshot = newest // pin the rest of the run to the archive audited here
+		// Pin the rest of the run to the archive audited here.
+		res.Snapshot, res.SnapshotTime = newest.ID, newest.Time
 	}
 	if len(res.Evidence) == 0 {
 		return errorStep(res, "no L1 checks produced evidence"), nil
@@ -383,7 +388,8 @@ func (e *LocalExecutor) runResticL1(ctx context.Context, step StepSpec) (StepRes
 	if l1.SnapshotMaxAge != nil || l1.SizeAnomalyPct != nil {
 		evs, newest := archiveChecks(ctx, d, d.SnapshotSize, l1, step.Now, red)
 		res.Evidence = append(res.Evidence, evs...)
-		res.Snapshot = newest // pin the rest of the run to the snapshot audited here
+		// Pin the rest of the run to the snapshot audited here.
+		res.Snapshot, res.SnapshotTime = newest.ID, newest.Time
 	}
 	if len(res.Evidence) == 0 {
 		return errorStep(res, "no L1 checks produced evidence"), nil
@@ -393,21 +399,21 @@ func (e *LocalExecutor) runResticL1(ctx context.Context, step StepSpec) (StepRes
 	return res, nil
 }
 
-// resolveSnapshot returns the snapshot ID a restore level audits: the spec's
-// pin when set (no repo round-trip), else the newest from list. A non-empty
-// errMsg means the level errors (caller redacts it).
-func resolveSnapshot(ctx context.Context, step StepSpec, list func(context.Context) ([]driver.Snapshot, error), noneMsg string) (id, errMsg string) {
+// resolveSnapshot returns the snapshot a restore level audits: the spec's
+// pin when set (no repo round-trip; the time stays unknown), else the newest
+// from list. A non-empty errMsg means the level errors (caller redacts it).
+func resolveSnapshot(ctx context.Context, step StepSpec, list func(context.Context) ([]driver.Snapshot, error), noneMsg string) (snap driver.Snapshot, errMsg string) {
 	if step.Snapshot != "" {
-		return step.Snapshot, ""
+		return driver.Snapshot{ID: step.Snapshot}, ""
 	}
 	snaps, err := list(ctx)
 	if err != nil {
-		return "", err.Error()
+		return driver.Snapshot{}, err.Error()
 	}
 	if len(snaps) == 0 {
-		return "", noneMsg
+		return driver.Snapshot{}, noneMsg
 	}
-	return snaps[0].ID, ""
+	return snaps[0], ""
 }
 
 // nativeChecker is the slice of a SourceDriver the native-check evidence needs.
@@ -438,15 +444,15 @@ type snapshotLister interface {
 }
 
 // archiveChecks builds the engine-shared snapshot_max_age/size_anomaly
-// evidence and reports the newest snapshot ID, the run's pin.
-func archiveChecks(ctx context.Context, d snapshotLister, sizeFn func(context.Context, string) (int64, error), l1 *config.L1, now time.Time, red *redact.Redactor) ([]checks.Evidence, string) {
+// evidence and reports the newest snapshot, the run's pin.
+func archiveChecks(ctx context.Context, d snapshotLister, sizeFn func(context.Context, string) (int64, error), l1 *config.L1, now time.Time, red *redact.Redactor) ([]checks.Evidence, driver.Snapshot) {
 	snaps, err := d.ListSnapshots(ctx)
 	if err != nil {
-		return listErrorEvidence(l1, red.Redact(err.Error())), ""
+		return listErrorEvidence(l1, red.Redact(err.Error())), driver.Snapshot{}
 	}
-	var newest string
+	var newest driver.Snapshot
 	if len(snaps) > 0 {
-		newest = snaps[0].ID
+		newest = snaps[0]
 	}
 	return snapshotAgeAndSize(ctx, snaps, l1, now, red, sizeFn), newest
 }
@@ -596,11 +602,12 @@ func (e *LocalExecutor) runBorgL2(ctx context.Context, step StepSpec) (StepResul
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	archive, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no archives in repository")
+	snap, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no archives in repository")
 	if msg != "" {
 		return errorStep(res, red.Redact(msg)), nil
 	}
-	res.Snapshot = archive
+	archive := snap.ID
+	res.Snapshot, res.SnapshotTime = snap.ID, snap.Time
 
 	var paths []string
 	var predicted int64
@@ -641,11 +648,12 @@ func (e *LocalExecutor) runResticL2(ctx context.Context, step StepSpec) (StepRes
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
-	id, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no snapshots in repository")
+	snap, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no snapshots in repository")
 	if msg != "" {
 		return errorStep(res, red.Redact(msg)), nil
 	}
-	res.Snapshot = id
+	id := snap.ID
+	res.Snapshot, res.SnapshotTime = snap.ID, snap.Time
 
 	var paths []string
 	var predicted int64
@@ -702,7 +710,7 @@ func runDumpdirL2(ctx context.Context, step StepSpec) (StepResult, error) {
 		if len(snaps) == 0 {
 			return errorStep(res, fmt.Sprintf("no files match %q in %s", step.Source.Pattern, step.Source.Path)), nil
 		}
-		res.Snapshot = snaps[0].ID
+		res.Snapshot, res.SnapshotTime = snaps[0].ID, snaps[0].Time
 		selected := snaps[:1]
 		if step.Source.Pick == "all-matching-window" {
 			selected = snaps
@@ -782,6 +790,7 @@ var l2Builders = map[string]func(config.Check, l2Aggregates) checks.Check{
 	"file_count_tolerance_pct": func(cc config.Check, agg l2Aggregates) checks.Check {
 		return checks.FileCountTolerance{Count: agg.Count, Prev: agg.Prev, Pct: cc.FileCountTolerancePct}
 	},
+	"exec": func(cc config.Check, _ l2Aggregates) checks.Check { return checks.ExecScript{Command: cc.Exec} },
 }
 
 func buildL2Check(cc config.Check, agg l2Aggregates) checks.Check {

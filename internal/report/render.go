@@ -35,6 +35,9 @@ func Markdown(r Report) []byte {
 		if run.Snapshot != "" {
 			fmt.Fprintf(&b, "Audited snapshot: `%s`\n\n", mdEscape(run.Snapshot))
 		}
+		if line := rtoRPOLine(run); line != "" {
+			b.WriteString(line + "\n\n")
+		}
 		if len(run.Steps) > 0 {
 			b.WriteString("| Level | Status | Duration | Summary |\n|---|---|---|---|\n")
 			for _, s := range run.Steps {
@@ -102,6 +105,19 @@ func runHeadline(run *Run, now time.Time) string {
 	return s + ")"
 }
 
+// rtoRPOLine renders the proven RTO/RPO for a passing run: how long the
+// restore took, and how old the audited snapshot's data was when proven.
+func rtoRPOLine(run *Run) string {
+	if run.Result != "pass" {
+		return ""
+	}
+	s := "Proven RTO " + durationMS(run.DurationMS)
+	if !run.SnapshotTime.IsZero() && !run.FinishedAt.IsZero() {
+		s += " · RPO " + humanDuration(run.FinishedAt.Sub(run.SnapshotTime).Round(time.Minute)) + " (snapshot age at proof)"
+	}
+	return s
+}
+
 func statusCell(e Evidence) string {
 	s := strings.ToUpper(e.Status)
 	if e.Weak {
@@ -149,6 +165,7 @@ type htmlRun struct {
 	Headline string
 	Result   string
 	Snapshot string
+	RTORPO   string
 	Steps    []htmlStep
 	Evidence []htmlEvidence
 }
@@ -179,7 +196,7 @@ func htmlData(r Report) htmlView {
 			Proven:   provenLine(d, r.GeneratedAt),
 		}
 		if run := d.LastRun; run != nil {
-			hr := htmlRun{Headline: runHeadline(run, r.GeneratedAt), Result: run.Result, Snapshot: run.Snapshot}
+			hr := htmlRun{Headline: runHeadline(run, r.GeneratedAt), Result: run.Result, Snapshot: run.Snapshot, RTORPO: rtoRPOLine(run)}
 			for _, s := range run.Steps {
 				hr.Steps = append(hr.Steps, htmlStep{
 					Kind: s.Kind, Status: s.Status, Duration: durationMS(s.DurationMS), Summary: s.Summary,
@@ -238,6 +255,8 @@ ul { margin: .25rem 0; padding-left: 1.25rem; }
 {{if .Run}}
 <h3>Last run — <span class="status-{{.Run.Result}}">{{.Run.Headline}}</span></h3>
 {{if .Run.Snapshot}}<p class="muted">Audited snapshot: {{.Run.Snapshot}}</p>
+{{end}}
+{{if .Run.RTORPO}}<p class="muted">{{.Run.RTORPO}}</p>
 {{end}}
 {{if .Run.Steps}}
 <table>

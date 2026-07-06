@@ -320,7 +320,7 @@ Each check is a single-key mapping, e.g. `- path_exists: "config/config.php"`.
 | `file_count_tolerance_pct` | L2 | int (percent) | `fail` if the restored file count deviates more than this percent from the last proven run. |
 | `sql` | L3 | `{query, expect}` | Run `query`, compare the scalar to `expect`. Mismatch ⇒ `fail`; a query or coercion error ⇒ `error`. See [expect](#the-expect-predicate). |
 | `sql_no_error` | L3 | string query | `fail` if the query errors (the restored data is bad). |
-| `exec` | L2 / L3 | string | **Not implemented yet — rejected by validation** (a silently-dropped check could let a level pass while asserting nothing). Planned. |
+| `exec` | L2 / L3 | string command | The escape hatch: the command runs via `sh -c` — at L2 in the restored tree (CWD is the restore dir; `REDRILL_RESTORE_DIR` is set), at L3 inside the sandbox next to the loaded database. Exit `0` ⇒ `pass`, non-zero ⇒ `fail`, cannot-start/timeout ⇒ `error`. The first output line is captured as evidence. The command is operator-authored config — treat it with the same review care as the config itself. |
 
 ### The `sql` check
 

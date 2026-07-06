@@ -79,6 +79,9 @@ func TestMetricsEndpoint(t *testing.T) {
 		"# TYPE redrill_bytes_restored_total counter",
 		`redrill_bytes_restored_total{drill="app-db"} 1000`,
 		"redrill_scratch_used_bytes 0",
+		"redrill_datasets_proven_ratio 1",
+		`redrill_rto_seconds{drill="app-db"} 1.5`,
+		`redrill_rpo_seconds{drill="app-db"} 86402`, // finished_at − snapshot_time: 24h + 2s
 	}
 	for _, w := range wants {
 		if !strings.Contains(body, w) {
@@ -94,6 +97,14 @@ func TestMetricsStaleWhenNeverProven(t *testing.T) {
 	rec := do(t, s.Handler(), http.MethodGet, "/metrics")
 	if !strings.Contains(rec.Body.String(), `redrill_proof_sla_ok{drill="app-db"} 0`) {
 		t.Errorf("never-proven drill should report sla_ok 0:\n%s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "redrill_datasets_proven_ratio 0") {
+		t.Errorf("never-proven fleet should report ratio 0:\n%s", rec.Body.String())
+	}
+	// No passing run yet: RTO/RPO must be absent, not zero (a fake proven
+	// restore time would be a false comfort).
+	if strings.Contains(rec.Body.String(), `redrill_rto_seconds{`) || strings.Contains(rec.Body.String(), `redrill_rpo_seconds{`) {
+		t.Errorf("RTO/RPO samples present without a passing run:\n%s", rec.Body.String())
 	}
 }
 

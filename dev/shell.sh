@@ -35,6 +35,7 @@ if [ -t 0 ] && [ -t 1 ]; then TTY_FLAGS="-it"; fi
 
 # Knobs forwarded into the container when set on the host (docker omits unset ones).
 PASS_ENV="-e SEED -e NUM_FILES -e USERS -e EVENTS -e PG_IMAGE -e KEEP \
+  -e SABOTAGE -e FIXTURE_DIR \
   -e BORG_REPO -e BORG_PASSPHRASE_FILE -e BORG_PASSPHRASE -e BORG_RSH \
   -e DUMP_DIR -e PATTERN -e ARCHIVE -e SAMPLE_FILES \
   -e CONFIG_PATH -e DB_DUMP_PATH -e ASSERT_DB -e ASSERT_SQL_1 -e ASSERT_SQL_2"

@@ -32,12 +32,36 @@ DUMP_DIR=/work/dumpdir-fixture dev/shell.sh dev/drill.sh
 
 | Piece | What it does |
 |---|---|
-| `Dockerfile` | The dev image: bash, coreutils, borg, postgres client, gzip/zstd, ssh, docker CLI |
+| `Dockerfile` | The dev image: bash, coreutils, borg, restic, postgres client, gzip/zstd, ssh, docker CLI |
 | `shell.sh` | Host entrypoint (needs only Docker). Builds the image on first use; mounts the repo at `/repo`, a persistent data volume at `/work`, and the Docker socket |
 | `lib.sh` | Shared helpers: deterministic tree/DB generation, pg container lifecycle, formatting |
 | `make-borg-fixture.sh` | Sample file tree + seeded pg dump (custom format) → borg repo (repokey, passphrase file), two archives so "newest" matters |
 | `make-dumpdir-fixture.sh` | Three timestamped `myapp-*.sql.gz` generations, mtimes backdated 2d/1d/now, newest contains extra rows — exercises `pick: newest` |
+| `make-restic-fixture.sh` | The restic mirror of the borg builder: same tree + dump → restic repo (password file), two snapshots. Drill it with `redrill` itself (`drill.sh` is borg/dumpdir-only; the builder prints a source snippet) |
 | `drill.sh` | The e2e loop, borg or dumpdir mode: fetch/restore (sample + DB dump) → postgres sandbox (`network=none`, labeled, removed on exit) → two SQL asserts → `results.md` |
+
+### Sabotage variants
+
+Every builder takes `SABOTAGE=<variant>` and produces a fixture that a drill
+**must fail** — the manual mirror of the Go sabotage kit, for demos and
+hand-verifying that a check catches its class:
+
+| Builder | Variant | Dead-backup shape | Caught by |
+|---|---|---|---|
+| dumpdir | `empty-dump` | newest dump is 0 bytes, mtime fresh | `file_min_bytes` / `compression_test` (L1) |
+| dumpdir | `truncated-dump` | valid gzip cut mid-stream | `compression_test` (L1) |
+| dumpdir | `stale-source` | every generation ≥30 d old | `max_age` (L1) |
+| borg | `stale-source` | archives timestamped 30 d ago | `snapshot_max_age` (L1) |
+| borg | `truncated-segment` | a repo segment truncated | `native_check` (L1) |
+| borg | `missing-data-dir` | `data/` excluded from the archives | `path_exists` (L2) |
+| restic | `missing-pack` | a pack file deleted | `native_check` (L1) |
+| restic | `stale-source` | snapshots timestamped 30 d ago | `snapshot_max_age` (L1) |
+| restic | `missing-data-dir` | `data/` excluded from the backup | `path_exists` (L2) |
+
+```sh
+SABOTAGE=empty-dump dev/shell.sh dev/make-dumpdir-fixture.sh
+DUMP_DIR=/work/dumpdir-fixture dev/shell.sh dev/drill.sh   # exits 1: the backup is bad
+```
 
 Containers started from inside the dev env (fixture pg, sandbox pg) run as **siblings** on
 the Docker daemon via the mounted socket — nothing is nested. All file transfer into the
@@ -59,6 +83,7 @@ All pass through `dev/shell.sh` automatically when set on the host, e.g.
 | Variable | Default | Used by | Meaning |
 |---|---|---|---|
 | `SEED` | `42` | builders, drill | Determinism seed (tree, rows, sampling) |
+| `SABOTAGE` | unset | builders | Build a dead-backup variant (see the table above); unset = healthy |
 | `NUM_FILES` / `USERS` / `EVENTS` | `300` / `500` / `2000` | builders | Fixture sizing |
 | `PG_IMAGE` | `postgres:16` | builders, drill | Postgres image (pin to match the dump's major) |
 | `FIXTURE_DIR` | `/work/<kind>-fixture` | builders | Where the fixture lands (inside the data volume) |

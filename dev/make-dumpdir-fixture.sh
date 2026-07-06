@@ -13,6 +13,11 @@
 # Reproducible: same SEED -> same rows and same dump bytes (gzip -n), except
 # timestamps, which stay "now"-relative on purpose.
 #
+# SABOTAGE variants (a drill against the fixture MUST then fail):
+#   SABOTAGE=empty-dump      newest dump is 0 bytes, mtime fresh -> file_min_bytes/compression_test
+#   SABOTAGE=truncated-dump  newest dump is a gzip cut mid-stream -> compression_test
+#   SABOTAGE=stale-source    every generation backdated >=30d -> max_age
+#
 # Run inside the dev env: dev/shell.sh dev/make-dumpdir-fixture.sh
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
@@ -24,13 +29,19 @@ USERS=${USERS:-500}
 EVENTS=${EVENTS:-2000}
 PG_IMAGE=${PG_IMAGE:-postgres:16}
 FIXTURE_PG=${FIXTURE_PG:-redrill-dev-fixture-pg}
+SABOTAGE=${SABOTAGE:-}
+
+case "$SABOTAGE" in
+  ""|empty-dump|truncated-dump|stale-source) ;;
+  *) die "unknown SABOTAGE '$SABOTAGE' (empty-dump | truncated-dump | stale-source)" ;;
+esac
 
 command -v docker >/dev/null || die "docker CLI not found — run this via dev/shell.sh"
 docker info >/dev/null 2>&1 || die "docker daemon not reachable"
 
 trap 'pg_stop "$FIXTURE_PG"' EXIT
 
-log "Building dumpdir fixture (SEED=$SEED) at $FIXTURE_DIR"
+log "Building dumpdir fixture (SEED=$SEED${SABOTAGE:+, SABOTAGE=$SABOTAGE}) at $FIXTURE_DIR"
 rm -rf "${FIXTURE_DIR:?}"
 mkdir -p "$FIXTURE_DIR"
 
@@ -53,9 +64,33 @@ grow_events "$FIXTURE_PG" $(( EVENTS + 1 )) 100   # newest dump differs: 100 fre
 dump_sampledb "$FIXTURE_PG" plain-gz "$F_0D"
 pg_stop "$FIXTURE_PG"
 
+case "$SABOTAGE" in
+  empty-dump)
+    # The canonical "perfect cron, dead backup": file present, mtime fresh,
+    # zero bytes.
+    : > "$F_0D"
+    ;;
+  truncated-dump)
+    # A valid gzip cut mid-stream — plausible size, dead contents.
+    head -c $(( $(file_bytes "$F_0D") - 8 )) "$F_0D" > "$F_0D.t"
+    mv "$F_0D.t" "$F_0D"
+    ;;
+  stale-source)
+    # The cron died a month ago: every generation is ancient.
+    backdate "$(epoch_days_ago 32)" "$F_2D"
+    backdate "$(epoch_days_ago 31)" "$F_1D"
+    backdate "$(epoch_days_ago 30)" "$F_0D"
+    ;;
+esac
+
 log "Fixture ready"
 note "dir: $FIXTURE_DIR"
 ls -l "$FIXTURE_DIR" | sed 's/^/    /' >&2
+case "$SABOTAGE" in
+  empty-dump)     note "SABOTAGE=empty-dump: a drill MUST fail at L1 (file_min_bytes/compression_test)" ;;
+  truncated-dump) note "SABOTAGE=truncated-dump: a drill MUST fail at L1 (compression_test)" ;;
+  stale-source)   note "SABOTAGE=stale-source: a drill with max_age <30d MUST fail at L1" ;;
+esac
 note ""
 note "Drill it:"
 note "  DUMP_DIR='$FIXTURE_DIR' dev/shell.sh dev/drill.sh"

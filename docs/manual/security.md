@@ -110,7 +110,9 @@ Honesty about the negative space:
   a level degraded to `skipped`, is unproven and shown as such — absence of
   proof, not evidence of health.
 - **It does not scan for malware or ransomware.** `size_anomaly_pct` flags
-  gross size drift as advisory signal; nothing more is claimed.
+  gross size drift and `entropy_anomaly` flags text files that restore as
+  near-random bytes — both advisory signals that never fail a drill; nothing
+  more is claimed.
 - **A compromised redrill host holds redrill's credentials.** Least-privilege
   setup ([credentials](credentials.md)) caps that at read access plus, if
   mounted, the docker socket — which is why the socket deserves the paragraph

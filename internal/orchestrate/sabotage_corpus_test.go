@@ -6,6 +6,7 @@
 package orchestrate
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -145,6 +146,80 @@ func TestSabotageFileCountEmptyExport(t *testing.T) {
 	res := runDrill(t, st, drill, src, RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
 	mustFail(t, res, "filecount-dead-export")
 	assertCaught(t, res, "file_count")
+}
+
+// entropyDrill audits a directory of plain .sql dumps with the advisory
+// encryption canary.
+func entropyDrill(dir string) (config.Drill, config.Source) {
+	src := config.Source{Name: "dumps", Type: "dumpdir", Path: dir, Pattern: "*.sql", Pick: "all-matching-window"}
+	levels := config.Levels{L2: &config.L2{
+		Restore: config.Restore{Scope: "full"},
+		Checks: []config.Check{
+			{Kind: "min_total_bytes", MinTotalBytes: config.Size(1)},
+			{Kind: "entropy_anomaly", EntropyAnomaly: true},
+		},
+	}}
+	return config.Drill{Name: "dumps", Source: "dumps", Levels: levels}, src
+}
+
+// randomBytes is deterministic near-max-entropy content (chained sha256).
+func randomBytes(n int) string {
+	out := make([]byte, 0, n)
+	block := sha256.Sum256([]byte("redrill-corpus-entropy"))
+	for len(out) < n {
+		out = append(out, block[:]...)
+		block = sha256.Sum256(block[:])
+	}
+	return string(out[:n])
+}
+
+// entropy-encrypted-restore: text-class files that come back as random bytes
+// raise the ANOMALY flag. Advisory kinds are exempt from the fail gate
+// (size_anomaly precedent): the run PASSES either way — the flag in the
+// evidence is the whole signal, and the healthy mirror stays quiet.
+func TestEntropyAnomalyFlagsEncryptedRestore(t *testing.T) {
+	t.Parallel()
+	healthy := t.TempDir()
+	for i := 0; i < 10; i++ {
+		writeFile(t, healthy, fmt.Sprintf("dump-%02d.sql", i),
+			strings.Repeat("INSERT INTO users VALUES (1, 'user', 'user@example.test');\n", 20))
+	}
+	st := newStore(t)
+	drill, src := entropyDrill(healthy)
+	res := runDrill(t, st, drill, src, RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
+	if res.Status != store.ResultPass {
+		t.Fatalf("healthy = %s, want pass; levels = %+v", res.Status, res.Levels)
+	}
+	if flagged, ev := entropyEvidence(res); flagged {
+		t.Errorf("healthy restore flagged: %q", ev)
+	}
+
+	encrypted := t.TempDir()
+	for i := 0; i < 10; i++ {
+		writeFile(t, encrypted, fmt.Sprintf("dump-%02d.sql", i), randomBytes(4096))
+	}
+	drill, src = entropyDrill(encrypted)
+	res = runDrill(t, newStore(t), drill, src, RunOptions{Scratch: config.Scratch{Dir: t.TempDir()}})
+	if res.Status != store.ResultPass {
+		t.Fatalf("encrypted = %s, want pass (advisory never fails); levels = %+v", res.Status, res.Levels)
+	}
+	flagged, ev := entropyEvidence(res)
+	if !flagged {
+		t.Fatalf("encrypted restore not flagged; evidence = %q", ev)
+	}
+}
+
+// entropyEvidence returns whether the entropy_anomaly evidence carries the
+// ANOMALY flag, plus its text (asserting weak along the way).
+func entropyEvidence(res RunResult) (bool, string) {
+	for _, lv := range res.Levels {
+		for _, ev := range lv.Evidence {
+			if ev.Kind == "entropy_anomaly" && ev.Weak {
+				return strings.Contains(ev.Actual, "ANOMALY"), ev.Actual
+			}
+		}
+	}
+	return false, "(no weak entropy_anomaly evidence)"
 }
 
 // The cry-wolf mirror: 60 healthy jpegs pass the same assertion.

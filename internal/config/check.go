@@ -26,6 +26,7 @@ type Check struct {
 	Exec                  string
 	FileCount             *FileCountCheck
 	TCPPort               int
+	EntropyAnomaly        bool
 }
 
 type SQLCheck struct {
@@ -54,6 +55,7 @@ const (
 	checkExec             = "exec"
 	checkFileCount        = "file_count"
 	checkTCP              = "tcp"
+	checkEntropyAnomaly   = "entropy_anomaly"
 )
 
 // checkSpec is one row of the check-kind catalog: where the kind may appear
@@ -134,6 +136,9 @@ var checkCatalog = map[string]checkSpec{
 				es.add(path, "sql_no_error requires a query")
 			}
 		}},
+	// entropy_anomaly is advisory like size_anomaly: it flags, never fails.
+	checkEntropyAnomaly: {levels: lvl("l2"),
+		decode: func(c *Check, n *yaml.Node) error { return n.Decode(&c.EntropyAnomaly) }},
 	// tcp is the generic "service answers" probe, run inside the sandbox
 	// (network=none blocks probing from outside): connection refused = fail.
 	checkTCP: {levels: lvl("l3"),

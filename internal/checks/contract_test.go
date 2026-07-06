@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,6 +258,25 @@ var contractCases = []contractCase{
 		return FileCount{Glob: "*.jpg", Expect: "> 0"}, CheckEnv{RestoreDir: filepath.Join(t.TempDir(), "gone"), Now: now}
 	}},
 
+	// --- entropy_anomaly: advisory encryption canary — flags, never fails ---
+	{kind: kindEntropyAnomaly, name: "normal-text/pass", want: Pass, weak: true, actualHas: "0 of 3", build: func(t *testing.T) (Check, CheckEnv) {
+		return EntropyAnomaly{}, CheckEnv{RestoreDir: textTree(t, 3, 0), Now: now}
+	}},
+	{kind: kindEntropyAnomaly, name: "encrypted-text/pass-but-flagged", want: Pass, weak: true, actualHas: "ANOMALY", build: func(t *testing.T) (Check, CheckEnv) {
+		return EntropyAnomaly{}, CheckEnv{RestoreDir: textTree(t, 0, 3), Now: now}
+	}},
+	{kind: kindEntropyAnomaly, name: "single-odd-file-stays-quiet/pass", want: Pass, weak: true, actualHas: "1 of 11", build: func(t *testing.T) (Check, CheckEnv) {
+		return EntropyAnomaly{}, CheckEnv{RestoreDir: textTree(t, 10, 1), Now: now}
+	}},
+	{kind: kindEntropyAnomaly, name: "media-not-judged/pass", want: Pass, weak: true, actualHas: "no signal", build: func(t *testing.T) (Check, CheckEnv) {
+		dir := t.TempDir()
+		write(t, filepath.Join(dir, "a.jpg"), string(randomish(4096)))
+		return EntropyAnomaly{}, CheckEnv{RestoreDir: dir, Now: now}
+	}},
+	{kind: kindEntropyAnomaly, name: "unreadable-restore/error", want: Error, weak: true, build: func(t *testing.T) (Check, CheckEnv) {
+		return EntropyAnomaly{}, CheckEnv{RestoreDir: filepath.Join(t.TempDir(), "gone"), Now: now}
+	}},
+
 	// --- tcp: the generic "service answers" probe ---
 	{kind: kindTCP, name: "connection-refused/fail", want: Fail, build: func(_ *testing.T) (Check, CheckEnv) {
 		return TCPPort{Port: 5432}, CheckEnv{Sandbox: fakeSandbox{exit: 1}, Now: now}
@@ -270,6 +290,33 @@ var contractCases = []contractCase{
 }
 
 var errExecTransport = errors.New("container gone")
+
+// randomish is deterministic near-max-entropy bytes (chained sha256) — the
+// shape of encrypted content, reproducible for tests.
+func randomish(n int) []byte {
+	out := make([]byte, 0, n)
+	block := sha256.Sum256([]byte("redrill-entropy-seed"))
+	for len(out) < n {
+		out = append(out, block[:]...)
+		block = sha256.Sum256(block[:])
+	}
+	return out[:n]
+}
+
+// textTree writes normal .sql files and "encrypted" ones (random bytes under
+// a text-class name — the ransomware shape) into a fresh dir.
+func textTree(t *testing.T, normal, encrypted int) string {
+	t.Helper()
+	dir := t.TempDir()
+	for i := 0; i < normal; i++ {
+		write(t, filepath.Join(dir, fmt.Sprintf("dump-%02d.sql", i)),
+			strings.Repeat("INSERT INTO users VALUES (1, 'user', 'user@example.test');\n", 20))
+	}
+	for i := 0; i < encrypted; i++ {
+		write(t, filepath.Join(dir, fmt.Sprintf("enc-%02d.sql", i)), string(randomish(4096)))
+	}
+	return dir
+}
 
 func TestContract(t *testing.T) {
 	t.Parallel()
@@ -308,8 +355,10 @@ func TestContractCoversEveryKind(t *testing.T) {
 		kindPathExists, kindPathAbsent, kindCanaryFile, kindHashMatch,
 		kindNewestFileMaxAge, kindMinTotalBytes, kindFileCountTolerance,
 		kindSQL, kindSQLNoError, kindExec, kindFileCount, kindTCP,
+		kindEntropyAnomaly,
 	}
-	advisory := map[string]bool{kindSizeAnomaly: true} // always passes; no fail direction
+	// Always-pass advisories: they flag, never fail.
+	advisory := map[string]bool{kindSizeAnomaly: true, kindEntropyAnomaly: true}
 
 	known := map[string]bool{}
 	for _, k := range all {

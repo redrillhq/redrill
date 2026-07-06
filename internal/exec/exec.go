@@ -790,6 +790,9 @@ func finishL2(ctx context.Context, res StepResult, restoreDir string, cfgChecks 
 		if cc.Kind == "hash_match" && !cc.HashMatch {
 			continue // explicitly disabled
 		}
+		if cc.Kind == "entropy_anomaly" && !cc.EntropyAnomaly {
+			continue // explicitly disabled
+		}
 		c := buildL2Check(cc, l2Aggregates{Count: count, Total: total, Newest: newest, Prev: step.PrevFileCount})
 		if c == nil {
 			// A configured check must never vanish silently (it would let the
@@ -845,6 +848,7 @@ var l2Builders = map[string]func(config.Check, l2Aggregates) checks.Check{
 		}
 		return checks.FileCount{Glob: cc.FileCount.Glob, MinSize: cc.FileCount.MinSize.Bytes(), Expect: cc.FileCount.Expect}
 	},
+	"entropy_anomaly": func(config.Check, l2Aggregates) checks.Check { return checks.EntropyAnomaly{} },
 }
 
 func buildL2Check(cc config.Check, agg l2Aggregates) checks.Check {

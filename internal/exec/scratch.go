@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/redrillhq/redrill/internal/driver/subproc"
 )
 
 type scratch struct {
@@ -60,12 +62,23 @@ func CleanStaleScratch(base string) (int, error) {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "run-") {
 			continue
 		}
+		// A crashed mount-mode run can leave a live FUSE mount at run-*/mnt;
+		// unmount it (best-effort) before RemoveAll, which would otherwise
+		// fail or descend into the mounted snapshot.
+		if mnt := filepath.Join(base, e.Name(), "mnt"); dirExists(mnt) {
+			_ = subproc.Unmounter(mnt)()
+		}
 		if err := os.RemoveAll(filepath.Join(base, e.Name())); err != nil {
 			return n, fmt.Errorf("clean scratch %s: %w", base, err)
 		}
 		n++
 	}
 	return n, nil
+}
+
+func dirExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
 }
 
 // FreeBytes returns the bytes available to an unprivileged writer at path.

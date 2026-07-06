@@ -56,6 +56,33 @@ drills:
 	}
 }
 
+// A mount-mode L2 with mount-compatible checks validates: the positive
+// direction of the restore.mode rules.
+func TestMountModeValidates(t *testing.T) {
+	t.Parallel()
+	_, err := Parse([]byte(`
+version: 1
+data_dir: /var/lib/redrill
+scratch: {dir: /var/lib/redrill/scratch}
+sources:
+  - {name: vault, type: borg, repo: "ssh://backup@nas/./repo", passphrase_file: /s/pass}
+drills:
+  - name: files
+    source: vault
+    max_proof_age: 10d
+    levels:
+      l2:
+        restore: {mode: mount}
+        checks:
+          - path_exists: "config/config.php"
+          - file_count: {glob: "**/*.jpg", min_size: 1, expect: "> 50"}
+          - newest_file_max_age: 8d
+`))
+	if err != nil {
+		t.Fatalf("mount-mode config must validate: %v", err)
+	}
+}
+
 // At its correct level the source rule still fires.
 func TestHashMatchDumpdirStillRejectedAtL2(t *testing.T) {
 	t.Parallel()

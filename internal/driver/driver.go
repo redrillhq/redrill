@@ -55,3 +55,22 @@ type SourceDriver interface {
 	NativeCheck(ctx context.Context, opts NativeCheckOpts) (Report, error)
 	Restore(ctx context.Context, sel Selection, targetDir string) (RestoreReport, error)
 }
+
+// Mounter is the optional read-only FUSE seam (restore.mode: mount): engines
+// that can present a snapshot as a filesystem implement it, so L2 checks run
+// against the mount instead of a full copy into scratch. Mounting never
+// writes to the repository.
+type Mounter interface {
+	// Mount presents snapshotID under mountpoint and blocks until it serves.
+	Mount(ctx context.Context, snapshotID, mountpoint string) (MountHandle, error)
+}
+
+// MountHandle is a live mount; Unmount must be called (idempotent) when the
+// level's checks finish.
+type MountHandle interface {
+	// Root is the directory holding the snapshot's tree — the mount-mode
+	// equivalent of a copy restore's target dir (engine path quirks, like
+	// restic's ids/<short>/<absolute path> nesting, are resolved here).
+	Root() string
+	Unmount() error
+}

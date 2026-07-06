@@ -63,6 +63,13 @@ so. Options, in decreasing order of caution:
 4. Drop the socket entirely — L1/L2 still run; L3 reports `skipped (no
    sandbox runtime)` and the board shows exactly what remains unproven.
 
+The same calculus applies to `restore.mode: mount`: FUSE inside a container
+needs `/dev/fuse` plus `CAP_SYS_ADMIN`, a broad capability. Grant it only
+when mount-mode drills are in use (the compose example carries the knobs
+commented out), or run redrill on the host where no extra capability is
+involved. Without FUSE, mount-mode drills report `error` — the degradation
+is loud, never a silent pass.
+
 ## The HTTP surface
 
 `redrill serve` only listens when `server.listen` is set, and then **auth is

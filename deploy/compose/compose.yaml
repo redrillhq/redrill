@@ -24,6 +24,14 @@ services:
       # Open http://127.0.0.1:8090/ for the dashboard. Bound to localhost — front
       # with a reverse proxy for remote access.
       - "127.0.0.1:8090:8090"
+    # restore.mode: mount (FUSE verification without copying) needs the FUSE
+    # device and mount privileges — uncomment when a drill uses it:
+    # devices:
+    #   - /dev/fuse
+    # cap_add:
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - apparmor:unconfined
     volumes:
       - ./config.example.yaml:/etc/redrill/config.yaml:ro
       - redrill-data:/var/lib/redrill # sqlite store + scratch

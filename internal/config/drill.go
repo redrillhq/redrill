@@ -47,6 +47,7 @@ type L2 struct {
 }
 
 type Restore struct {
+	Mode         string   `yaml:"mode"`  // copy (default) | mount (FUSE, borg/restic only)
 	Scope        string   `yaml:"scope"` // sample | full
 	Sample       *Sample  `yaml:"sample"`
 	IncludePaths []string `yaml:"include_paths"`
@@ -137,13 +138,37 @@ func (l *L1) hasVerdictCheck() bool {
 }
 
 func (l *L2) validate(path, srcType string, es *errset) {
-	if l.Restore.Scope != "" && l.Restore.Scope != "sample" && l.Restore.Scope != "full" {
-		es.add(path+".restore.scope", "must be sample or full, got %q", l.Restore.Scope)
-	}
-	// An empty sample would silently restore the whole snapshot with a zero
-	// preflight prediction, bypassing the quota's early refusal.
-	if l.Restore.Scope != "full" && l.Restore.Sample == nil && len(l.Restore.IncludePaths) == 0 {
-		es.add(path+".restore", "a sample-scope restore requires sample or include_paths (use scope: full to restore everything)")
+	switch l.Restore.Mode {
+	case "", "copy":
+		if l.Restore.Scope != "" && l.Restore.Scope != "sample" && l.Restore.Scope != "full" {
+			es.add(path+".restore.scope", "must be sample or full, got %q", l.Restore.Scope)
+		}
+		// An empty sample would silently restore the whole snapshot with a zero
+		// preflight prediction, bypassing the quota's early refusal.
+		if l.Restore.Scope != "full" && l.Restore.Sample == nil && len(l.Restore.IncludePaths) == 0 {
+			es.add(path+".restore", "a sample-scope restore requires sample or include_paths (use scope: full to restore everything)")
+		}
+	case "mount":
+		// A FUSE mount exposes the whole snapshot on demand; there is no copy
+		// to scope or sample, and dumps are single files with nothing to mount.
+		if srcType == "dumpdir" {
+			es.add(path+".restore.mode", "mount is not valid for a dumpdir source (a dump is a single file; use copy)")
+		}
+		if l.Restore.Scope != "" && l.Restore.Scope != "full" {
+			es.add(path+".restore.scope", "scope %q is not valid with mode: mount (the mount exposes the whole snapshot)", l.Restore.Scope)
+		}
+		if l.Restore.Sample != nil || len(l.Restore.IncludePaths) > 0 {
+			es.add(path+".restore", "sample/include_paths are not valid with mode: mount (sampling applies to copy restores)")
+		}
+		// Nothing extracts under a mount, so "engine-verified on extract" would
+		// be a false claim.
+		for i := range l.Checks {
+			if l.Checks[i].Kind == checkHashMatch {
+				es.add(checkPath(path, i), "hash_match is not valid with mode: mount (nothing extracts, so nothing is engine-verified)")
+			}
+		}
+	default:
+		es.add(path+".restore.mode", "must be copy or mount, got %q", l.Restore.Mode)
 	}
 	for i := range l.Checks {
 		l.Checks[i].validate(checkPath(path, i), "l2", srcType, es)

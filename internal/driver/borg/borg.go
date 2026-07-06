@@ -68,7 +68,10 @@ func WithRunner(r Runner) Option {
 	}
 }
 
-var _ driver.SourceDriver = (*Driver)(nil)
+var (
+	_ driver.SourceDriver = (*Driver)(nil)
+	_ driver.Mounter      = (*Driver)(nil)
+)
 
 func New(repo string, opts ...Option) *Driver {
 	d := &Driver{repo: repo, binary: "borg", run: subproc.ExecRunner}
@@ -159,6 +162,35 @@ func (d *Driver) ListFiles(ctx context.Context, archive string) ([]driver.FileEn
 	}
 	return parseFiles(stdout)
 }
+
+// Mount presents an archive read-only via borg's FUSE support
+// (restore.mode: mount). The child runs `borg mount --foreground`; readiness
+// is the mountpoint serving entries; unmount is `borg umount`, with a signal
+// to the child as fallback.
+func (d *Driver) Mount(ctx context.Context, snapshotID, mountpoint string) (driver.MountHandle, error) {
+	args := []string{"mount", "--foreground", d.repo + "::" + snapshotID, mountpoint}
+	proc, err := subproc.StartMount(ctx, "", d.env(), d.binary, args,
+		func() bool { return subproc.DirServing(mountpoint) },
+		func() error {
+			_, err := subproc.Output(ctx, d.run, "", d.env(), d.binary,
+				[]string{"umount", mountpoint}, "borg umount "+mountpoint)
+			return err
+		})
+	if err != nil {
+		return nil, err
+	}
+	return borgMount{proc: proc, root: mountpoint}, nil
+}
+
+// borgMount serves the archive's stored paths directly at the mountpoint —
+// the same tree shape as a borg copy restore.
+type borgMount struct {
+	proc *subproc.MountProc
+	root string
+}
+
+func (m borgMount) Root() string   { return m.root }
+func (m borgMount) Unmount() error { return m.proc.Stop() }
 
 // ArchiveSize returns an archive's original (uncompressed) size.
 func (d *Driver) ArchiveSize(ctx context.Context, id string) (int64, error) {

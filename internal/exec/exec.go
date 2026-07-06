@@ -602,6 +602,9 @@ func (e *LocalExecutor) runBorgL2(ctx context.Context, step StepSpec) (StepResul
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
 	}
+	if l2.Restore.Mode == "mount" {
+		return mountAndCheck(ctx, step, d, d.ListSnapshots, "no archives in repository", red)
+	}
 	snap, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no archives in repository")
 	if msg != "" {
 		return errorStep(res, red.Redact(msg)), nil
@@ -647,6 +650,9 @@ func (e *LocalExecutor) runResticL2(ctx context.Context, step StepSpec) (StepRes
 	}
 	if err := d.Validate(ctx); err != nil {
 		return errorStep(res, red.Redact(err.Error())), nil
+	}
+	if l2.Restore.Mode == "mount" {
+		return mountAndCheck(ctx, step, d, d.ListSnapshots, "no snapshots in repository", red)
 	}
 	snap, msg := resolveSnapshot(ctx, step, d.ListSnapshots, "no snapshots in repository")
 	if msg != "" {
@@ -733,6 +739,40 @@ func runDumpdirL2(ctx context.Context, step StepSpec) (StepResult, error) {
 		return errorStep(res, err.Error()), nil
 	}
 	return finishL2(ctx, res, sc.root, l2.Checks, step, red), nil
+}
+
+// mountAndCheck is the mount-mode L2: present the pinned snapshot via FUSE
+// and run the checks against the live mount — no bytes copied into scratch
+// (the frugal-IO principle this mode exists for). No FUSE or a failed mount
+// is an error, never a silent fallback to copy.
+func mountAndCheck(ctx context.Context, step StepSpec, d driver.Mounter, list func(context.Context) ([]driver.Snapshot, error), noneMsg string, red *redact.Redactor) (StepResult, error) {
+	res := StepResult{Level: step.Level}
+	snap, msg := resolveSnapshot(ctx, step, list, noneMsg)
+	if msg != "" {
+		return errorStep(res, red.Redact(msg)), nil
+	}
+	res.Snapshot, res.SnapshotTime = snap.ID, snap.Time
+
+	// Scratch holds only the mountpoint dir; nothing is copied, so the quota
+	// preflight is moot.
+	sc, err := newScratch(step.Scratch.Dir, step.RunID, step.Scratch.MaxBytes.Bytes())
+	if err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	defer sc.cleanup()
+	mp := filepath.Join(sc.root, "mnt")
+	if err := os.MkdirAll(mp, 0o700); err != nil {
+		return errorStep(res, err.Error()), nil
+	}
+	h, err := d.Mount(ctx, snap.ID, mp)
+	if err != nil {
+		return errorStep(res, red.Redact("mount: "+err.Error()+" (mode: mount needs FUSE — /dev/fuse and an unmount tool; see the deploy docs)")), nil
+	}
+	defer func() { _ = h.Unmount() }() // before scratch cleanup (LIFO): never RemoveAll a live mount
+
+	res = finishL2(ctx, res, h.Root(), step.L2.Checks, step, red)
+	res.Bytes = 0 // nothing was restored-by-copy; the bytes counter must not count on-demand reads
+	return res, nil
 }
 
 func finishL2(ctx context.Context, res StepResult, restoreDir string, cfgChecks []config.Check, step StepSpec, red *redact.Redactor) StepResult {

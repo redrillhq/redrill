@@ -77,7 +77,10 @@ func WithRunner(r Runner) Option {
 	}
 }
 
-var _ driver.SourceDriver = (*Driver)(nil)
+var (
+	_ driver.SourceDriver = (*Driver)(nil)
+	_ driver.Mounter      = (*Driver)(nil)
+)
 
 func New(repo string, opts ...Option) *Driver {
 	d := &Driver{repo: repo, binary: "restic", run: subproc.ExecRunner}
@@ -209,6 +212,61 @@ func (d *Driver) Restore(ctx context.Context, sel driver.Selection, targetDir st
 	}
 	return subproc.DirReport(targetDir)
 }
+
+// Mount presents the repository read-only via restic's FUSE support
+// (restore.mode: mount). The child runs `restic mount --no-lock`; the
+// snapshot's tree is served under ids/<short-id>/<stored path>, so Root
+// resolves that nesting (and strips the single backup root, matching the
+// copy restore's relative layout).
+func (d *Driver) Mount(ctx context.Context, snapshotID, mountpoint string) (driver.MountHandle, error) {
+	// Resolve the backup root before mounting: it needs a repo call, and a
+	// failure should surface as a plain error, not a half-built mount.
+	root, err := d.snapshotRoot(ctx, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	args := d.global("mount", "--no-lock", mountpoint)
+	idsDir := filepath.Join(mountpoint, "ids")
+	proc, err := subproc.StartMount(ctx, "", d.env(), d.binary, args,
+		func() bool { return subproc.DirServing(idsDir) },
+		subproc.Unmounter(mountpoint))
+	if err != nil {
+		return nil, err
+	}
+	snapDir, err := idsEntry(idsDir, snapshotID)
+	if err != nil {
+		_ = proc.Stop()
+		return nil, err
+	}
+	treeRoot := snapDir
+	if root != "" {
+		treeRoot = filepath.Join(snapDir, filepath.FromSlash(strings.TrimPrefix(root, "/")))
+	}
+	return resticMount{proc: proc, root: treeRoot}, nil
+}
+
+// idsEntry finds the ids/ directory entry that prefixes the full snapshot ID
+// (the FUSE tree uses short IDs).
+func idsEntry(idsDir, snapshotID string) (string, error) {
+	entries, err := os.ReadDir(idsDir)
+	if err != nil {
+		return "", fmt.Errorf("restic mount: read %s: %w", idsDir, err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(snapshotID, e.Name()) {
+			return filepath.Join(idsDir, e.Name()), nil
+		}
+	}
+	return "", fmt.Errorf("restic mount: snapshot %.8s not present under %s", snapshotID, idsDir)
+}
+
+type resticMount struct {
+	proc *subproc.MountProc
+	root string
+}
+
+func (m resticMount) Root() string   { return m.root }
+func (m resticMount) Unmount() error { return m.proc.Stop() }
 
 // snapshotRoot returns a snapshot's single backup path (stripped on restore), or
 // "" when it has none or several (then the absolute layout is kept).

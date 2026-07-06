@@ -55,6 +55,7 @@ drills:
         size_anomaly_pct: 40         # latest archive >40% smaller than trailing avg -> warn
       l2:
         restore:
+          # mode: mount               # borg/restic: verify via FUSE mount, no copy (needs /dev/fuse; added 2026-07-06)
           scope: sample
           sample: { files: 200, newest: 50 }
           include_paths: ["config/", "data/admin/files/"]

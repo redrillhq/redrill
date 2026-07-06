@@ -13,6 +13,7 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -69,10 +70,44 @@ func collectDoctor(ctx context.Context, cfg *config.Config) []doctorCheck {
 	out = append(out, runtimeCheck(ctx, cfg))
 	out = append(out, scratchCheck(cfg))
 	out = append(out, ioToolChecks(cfg)...)
+	if c, due := fuseCheck(cfg); due {
+		out = append(out, c)
+	}
 	for i := range cfg.Sources {
 		out = append(out, repoCheck(ctx, cfg.Sources[i]))
 	}
 	return out
+}
+
+// fuseCheck preflights restore.mode: mount — unlike L3's degrade-to-skipped,
+// a mount-mode L2 errors without FUSE, so a missing /dev/fuse is a doctor
+// error, not a warning. due=false when no drill mounts.
+func fuseCheck(cfg *config.Config) (doctorCheck, bool) {
+	mounts := false
+	for i := range cfg.Drills {
+		if l2 := cfg.Drills[i].Levels.L2; l2 != nil && l2.Restore.Mode == "mount" {
+			mounts = true
+			break
+		}
+	}
+	if !mounts {
+		return doctorCheck{}, false
+	}
+	if runtime.GOOS != "linux" {
+		return doctorCheck{Name: "fuse", Status: statusWarn,
+			Detail: "restore.mode: mount is verified on Linux; this host is " + runtime.GOOS + " (macOS needs macFUSE)"}, true
+	}
+	if _, err := os.Stat("/dev/fuse"); err != nil {
+		return doctorCheck{Name: "fuse", Status: statusErr,
+			Detail: "/dev/fuse not available — mount-mode drills will error (in Docker: --device /dev/fuse --cap-add SYS_ADMIN)"}, true
+	}
+	for _, tool := range []string{"fusermount3", "fusermount", "umount"} {
+		if _, err := osexec.LookPath(tool); err == nil {
+			return doctorCheck{Name: "fuse", Status: statusOK, Detail: "/dev/fuse present, " + tool + " available"}, true
+		}
+	}
+	return doctorCheck{Name: "fuse", Status: statusErr,
+		Detail: "no unmount tool on PATH (fusermount3, fusermount, umount)"}, true
 }
 
 func engineChecks(ctx context.Context, cfg *config.Config) []doctorCheck {

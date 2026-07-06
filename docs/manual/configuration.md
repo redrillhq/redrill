@@ -277,15 +277,21 @@ with zero evidence (advisory `size_anomaly_pct` alone doesn't count).
 
 ### L2 — restorability
 
-Restore a sample (or the full set) into scratch, then assert against it.
+Restore a sample (or the full set) into scratch — or mount the snapshot via
+FUSE — then assert against it.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `restore.scope` | string | `sample` | `sample` \| `full`. A sample scope requires `sample` and/or `include_paths` (an empty sample would silently restore everything, bypassing the quota preflight). |
+| `restore.mode` | string | `copy` | `copy` \| `mount`. `mount` (borg/restic only) presents the snapshot read-only via `borg mount` / `restic mount` and runs the checks against the live mount — no bytes copied into scratch, so multi-hundred-GB backups verify in seconds of IO. Needs FUSE (`/dev/fuse`; in Docker add `--device /dev/fuse --cap-add SYS_ADMIN` — see the compose example) — without it the level is an `error`, never a silent fallback. `scope`/`sample`/`include_paths` don't apply (the mount exposes the whole snapshot), and `hash_match` is rejected (nothing extracts, so nothing is engine-verified). `redrill doctor` preflights FUSE when any drill mounts. |
+| `restore.scope` | string | `sample` | `sample` \| `full` (copy mode). A sample scope requires `sample` and/or `include_paths` (an empty sample would silently restore everything, bypassing the quota preflight). |
 | `restore.sample.files` | int | unset | Random files to restore (when `scope: sample`). |
 | `restore.sample.newest` | int | unset | Plus this many newest files. |
 | `restore.include_paths` | list of string | unset | Restrict/seed the restore to these subpaths. |
 | `checks` | list | unset | L2 checks — see the [catalog](#check-catalog). |
+
+> `bytes_restored` stays 0 for mount-mode runs — nothing is copied, and the
+> counter must not count on-demand reads. File counts (the
+> `file_count_tolerance_pct` baseline) reflect the whole mounted tree.
 
 ### L3 — usability
 

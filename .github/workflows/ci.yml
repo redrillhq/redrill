@@ -76,7 +76,10 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends borgbackup restic
+      # python3-llfuse is borg's FUSE binding (a Recommends, so it must be
+      # named under --no-install-recommends) and fuse3 provides fusermount3 —
+      # without them the restore.mode: mount tests error instead of mounting.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends borgbackup restic python3-llfuse fuse3
       - run: make test-integration
 
   # The sabotage kit (build tag: sabotage): every fixture must be flagged. Engine
@@ -91,5 +94,5 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends borgbackup restic
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends borgbackup restic python3-llfuse fuse3
       - run: make test-sabotage

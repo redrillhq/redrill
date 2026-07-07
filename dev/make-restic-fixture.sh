@@ -103,7 +103,7 @@ if [[ "$SABOTAGE" == missing-pack ]]; then
     if [[ -f "$f" ]]; then PACK="$f"; break; fi
   done
   [[ -n "$PACK" ]] || die "no pack file found to delete"
-  rm "$PACK"
+  rm -f "$PACK"   # -f: restic packs are 0400; rm must not stall on the prompt
   log "SABOTAGE: deleted pack $(basename "$PACK") — restic check must now fail"
 fi
 

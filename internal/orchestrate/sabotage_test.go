@@ -176,8 +176,13 @@ func TestSabotageResticBitrot(t *testing.T) {
 	repo, passFile := fixtures.Restic(t)
 
 	// Flip one byte a quarter into the largest pack: inside blob data, far
-	// from the trailing header.
+	// from the trailing header. restic writes packs read-only (0400), so the
+	// sabotage needs the write bit first — root would ignore the mode, a CI
+	// runner does not.
 	pack, size := largestPack(t, filepath.Join(repo, "data"))
+	if err := os.Chmod(pack, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	f, err := os.OpenFile(pack, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
